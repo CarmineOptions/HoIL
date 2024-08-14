@@ -54,7 +54,7 @@ fn compute_portfolio_value_strk_eth(
     new_total_value_usd / initial_total_value_usd
 }
 
-use ilhedge::helpers::percent;
+use hoil::helpers::percent;
 #[cfg(test)]
 fn test_compute_portfolio_value() {
     // k = 1500, initial price 1500.
