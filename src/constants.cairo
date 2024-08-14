@@ -1,3 +1,5 @@
+use cubit::f128::types::fixed::{Fixed, FixedTrait};
+
 const TOKEN_ETH_ADDRESS: felt252 =
     0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7; // mainnet & testnet. base token in case of eth/usdc
 const TOKEN_USDC_ADDRESS: felt252 =

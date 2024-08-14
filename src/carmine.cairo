@@ -5,7 +5,6 @@ use array::ArrayTrait;
 use debug::PrintTrait;
 
 use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
-use hoil::helpers::FixedHelpersTrait;
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
@@ -59,7 +58,7 @@ trait IAMM<TContractState> {
 }
 
 // Helper functions
-fn buy_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: felt252, quote_token_addr: felt252) {
+fn buy_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: ContractAddress, quote_token_addr: ContractAddress) {
     let option_type = if calls { 0 } else { 1 };
     // let amm_dispatcher = IAMM::dispatcher(AMM_ADDR);
     IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
@@ -69,14 +68,15 @@ fn buy_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_toke
         expiry.into(),
         0,
         notional.into(),
-        quote_token_addr.try_into().unwrap(),
-        base_token_addr.try_into().unwrap(),
+        quote_token_addr,
+        base_token_addr,
         (notional / 5).into(),
         (get_block_timestamp() + 42).into()
     );
 }
 
-fn price_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: felt252, quote_token_addr: felt252) -> u128 {
+fn price_option(
+    strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: ContractAddress, quote_token_addr: ContractAddress) -> u128 {
     let option_type = if calls { 0 } else { 1 };
     // let lpt_addr_felt: ContractAddress = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
     //     .get_lptoken_address_for_given_option(quote_token_addr.try_into().unwrap(), base_token_addr.try_into().unwrap(), option_type);
@@ -85,8 +85,8 @@ fn price_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_to
         option_side: 0,
         maturity: expiry.into(),
         strike_price: strike,
-        quote_token_address: quote_token_addr.try_into().unwrap(),
-        base_token_address: base_token_addr.try_into().unwrap(),
+        quote_token_address: quote_token_addr,
+        base_token_address: base_token_addr,
         option_type
     };
 
@@ -96,12 +96,12 @@ fn price_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_to
 }
 
 fn available_strikes(
-    expiry: u64, quote_token_addr: ContractAddress, base_token_addr: ContractAddress, calls: bool, maturity: u64
+    expiry: u64, quote_token_addr: ContractAddress, base_token_addr: ContractAddress, calls: bool
 ) -> Array<Fixed> {
     let option_type = if calls { 0 } else { 1 };
     // Get relevant lpt address
     let lpt_addr: ContractAddress = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
-        .get_lptoken_address_for_given_option(quote_token_addr.try_into().unwrap(), base_token_addr.try_into().unwrap(), option_type);
+        .get_lptoken_address_for_given_option(quote_token_addr, base_token_addr, option_type);
     // Get list of options
     let all_options = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
         .get_all_options(lpt_addr);
@@ -115,7 +115,7 @@ fn available_strikes(
             break;
         }
         let option = *all_options.at(i);
-        if option.maturity == maturity && option.option_type == option_type {
+        if option.maturity == expiry && option.option_type == option_type {
             res.append(option.strike_price);
         }
         i += 1;
