@@ -41,7 +41,7 @@ trait IPragmaOracle<TContractState> {
 
 
 fn _get_pragma_median_price(key: felt252) -> Fixed {
-    let (value, decimals, last_updated_timestamp, num_sources_aggregated) =
+    let (value, decimals, last_updated_timestamp, _) =
         IPragmaOracleDispatcher {
         contract_address: PRAGMA_ORACLE_ADDRESS.try_into().expect('Pragma/_GPMP - Cant convert')
     }
@@ -74,13 +74,13 @@ fn _get_ticker_key(
 ) -> felt252 {
     if base_token_addr.into() == TOKEN_ETH_ADDRESS {
         if quote_token_addr.into() == TOKEN_USDC_ADDRESS {
-            PragmaUtils::PRAGMA_ETH_USD_KEY
+            PRAGMA_ETH_USD_KEY
         } else {
             0
         }
     } else if base_token_addr.into() == TOKEN_STRK_ADDRESS {
         if quote_token_addr.into() == TOKEN_USDC_ADDRESS {
-            PragmaUtils::PRAGMA_STRK_USD_KEY
+            PRAGMA_STRK_USD_KEY
         } else {
             0
         }
@@ -112,8 +112,8 @@ fn get_pragma_median_price(
     // STRK/ETH gets special treatment
     if base_token_addr.into() == TOKEN_ETH_ADDRESS
         && quote_token_addr.into() == TOKEN_STRK_ADDRESS {
-        let eth_in_usd = _get_pragma_median_price(PragmaUtils::PRAGMA_ETH_USD_KEY);
-        let strk_in_usd = _get_pragma_median_price(PragmaUtils::PRAGMA_STRK_USD_KEY);
+        let eth_in_usd = _get_pragma_median_price(PRAGMA_ETH_USD_KEY);
+        let strk_in_usd = _get_pragma_median_price(PRAGMA_STRK_USD_KEY);
 
         let eth_in_strk = eth_in_usd / strk_in_usd;
 
@@ -122,7 +122,7 @@ fn get_pragma_median_price(
         let key = _get_ticker_key(quote_token_addr, base_token_addr);
 
         let res = _get_pragma_median_price(key);
-        account_for_stablecoin_divergence(res, quote_token_addr, 0)
+        account_for_stablecoin_divergence(res, quote_token_addr)
     }
 }
 
