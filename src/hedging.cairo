@@ -17,8 +17,18 @@ fn iterate_strike_prices(
     expiry: u64,
     calls: bool
 ) -> Span<(Fixed, Fixed)> {
-    let MAX_HEDGE_CALLS: Fixed = FixedTrait::from_unscaled_felt(3200);
-    let MAX_HEDGE_PUTS: Fixed = FixedTrait::from_unscaled_felt(800);
+    let (MAX_HEDGE_CALLS, MAX_HEDGE_PUTS) = if base_token_addr.into() == TOKEN_ETH_ADDRESS {
+        if quote_token_addr.into() == TOKEN_USDC_ADDRESS {
+            (FixedTrait::from_unscaled_felt(3500), FixedTrait::from_unscaled_felt(1200))
+        } else {
+            (FixedTrait::from_unscaled_felt(7800), FixedTrait::from_unscaled_felt(4000))
+        }
+    } else {
+        (
+            FixedTrait::from_unscaled_felt(7) / FixedTrait::from_unscaled_felt(10),
+            FixedTrait::from_unscaled_felt(2) / FixedTrait::from_unscaled_felt(10)
+        )
+    };
 
     let mut strike_prices_arr = available_strikes(expiry, quote_token_addr, base_token_addr, calls);
     let mut res = ArrayTrait::<(Fixed, Fixed)>::new();
