@@ -1,0 +1,22 @@
+[package]
+name = "hoil"
+version = "0.1.0"
+description = ""
+cairo-version = "2.7.0"
+homepage = ""
+
+[dependencies]
+alexandria_sorting = { git = "https://github.com/keep-starknet-strange/alexandria", rev = "27fbf5b" }
+cubit = { git = "https://github.com/influenceth/cubit.git"}
+snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.15.0"}
+starknet = ">=2.7.0"
+
+[[target.starknet-contract]]
+sierra = true
+casm = false
+
+[scripts]
+test = 'snforge test'
+
+[tool.snforge]
+
