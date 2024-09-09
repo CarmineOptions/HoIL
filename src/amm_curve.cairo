@@ -1,15 +1,11 @@
 use hoil::helpers::convert_from_int_to_Fixed;
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
-
 use debug::PrintTrait;
 
 // Computes the portfolio value if it moved from current (fetched from Empiric) to the specific strike
-// Notional is in ETH, it's the amount of ETH that needs to be hedged.
-// Also converts the excess to the hedge result asset
-// Result is USDC in case of puts, ETH in case of calls.
 fn compute_portfolio_value(curr_price: Fixed, notional: u128, calls: bool, strike: Fixed) -> Fixed {
-    let x = convert_from_int_to_Fixed(notional, 18); // in ETH
+    let x = convert_from_int_to_Fixed(notional, 18);
     let y = x * curr_price;
     let k = x * y;
 
@@ -17,41 +13,8 @@ fn compute_portfolio_value(curr_price: Fixed, notional: u128, calls: bool, strik
     // k = x * y
     // 1500 = 3000 / 2
     let y_at_strike = k.sqrt() * strike.sqrt();
-    let x_at_strike = k.sqrt() / strike.sqrt(); // actually sqrt is a hint so basically free.
+    let x_at_strike = k.sqrt() / strike.sqrt();
     convert_excess(x_at_strike, y_at_strike, x, strike, curr_price, calls)
-}
-
-fn compute_portfolio_value_strk_eth(
-    curr_price_eth_usd: Fixed,
-    curr_price_strk_usd: Fixed,
-    notional_eth: u128,
-    notional_strk: u128,
-    new_price_eth_usd: Fixed,
-    new_price_strk_usd: Fixed
-) -> Fixed {
-    // Convert notionals to Fixed
-    let x_eth = convert_from_int_to_Fixed(notional_eth, 18); // ETH amount
-    let x_strk = convert_from_int_to_Fixed(notional_strk, 18); // STRK amount
-
-    // Calculate initial values in USD
-    let initial_value_eth_usd = x_eth * curr_price_eth_usd;
-    let initial_value_strk_usd = x_strk * curr_price_strk_usd;
-    let initial_total_value_usd = initial_value_eth_usd + initial_value_strk_usd;
-
-    // Calculate the constant product k
-    let k = x_eth * x_strk;
-
-    // Calculate new amounts based on constant product formula
-    let new_x_eth = k.sqrt() / (new_price_strk_usd / new_price_eth_usd).sqrt();
-    let new_x_strk = k / new_x_eth;
-
-    // Calculate new values in USD
-    let new_value_eth_usd = new_x_eth * new_price_eth_usd;
-    let new_value_strk_usd = new_x_strk * new_price_strk_usd;
-    let new_total_value_usd = new_value_eth_usd + new_value_strk_usd;
-
-    // Return the ratio of new value to initial value
-    new_total_value_usd / initial_total_value_usd
 }
 
 use hoil::helpers::percent;
@@ -125,6 +88,5 @@ fn test_convert_excess() {
     let curr_price = FixedTrait::from_felt(0x6720000000000000000); // 1650
     let calls = false;
     let res = convert_excess(x_at_strike, y_at_strike, x, strike, curr_price, calls);
-    'res'.print();
     res.print(); // 0x66e6d320524ee400704 = 1646.426544496075
 }
