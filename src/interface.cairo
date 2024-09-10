@@ -19,6 +19,7 @@ trait IILHedge<TContractState> {
         expiry: u64
     ) -> (u128, u128);
     fn upgrade(ref self: TContractState, impl_hash: ClassHash);
+    fn get_owner(self: @TContractState) -> ContractAddress;
 }
 
 #[starknet::contract]
@@ -46,9 +47,16 @@ mod ILHedge {
     use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed};
 
     #[storage]
-    struct Storage {}
+    struct Storage {
+        owner: ContractAddress,
+    }
 
-    #[external(v0)]
+    #[constructor]
+    fn constructor(ref self: ContractState) {
+        self.owner.write(get_caller_address());
+    }
+
+    #[abi(embed_v0)]
     impl ILHedge of super::IILHedge<ContractState> {
         fn hedge(
             ref self: ContractState,
@@ -152,12 +160,14 @@ mod ILHedge {
 
         fn upgrade(ref self: ContractState, impl_hash: ClassHash) {
             let caller: ContractAddress = get_caller_address();
-            let owner: ContractAddress =
-                0x001dd8e12b10592676E109C85d6050bdc1E17adf1be0573a089E081C3c260eD9
-                .try_into()
-                .unwrap();
+            let owner: ContractAddress = self.owner.read();
             assert(owner == caller, 'invalid caller');
-            replace_class_syscall(impl_hash);
+            assert(!impl_hash.is_zero(), 'Class hash cannot be zero');
+            replace_class_syscall(impl_hash).unwrap();
+        }
+
+        fn get_owner(self: @ContractState) -> ContractAddress {
+            self.owner.read()
         }
 
         fn price_hedge(

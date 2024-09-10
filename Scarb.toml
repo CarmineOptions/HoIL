@@ -8,13 +8,14 @@ author = "Nikanor Goreglyad"
 
 [dependencies]
 alexandria_sorting = { git = "https://github.com/keep-starknet-strange/alexandria", rev = "27fbf5b" }
-cubit = { git = "https://github.com/influenceth/cubit.git"}
+cubit = { git = "https://github.com/CarmineOptions/cubit.git", branch = "feature/adjust-for-newer-cairo-version" }
 snforge_std = { git = "https://github.com/foundry-rs/starknet-foundry.git", tag = "v0.27.0"}
 starknet = ">=2.7.0"
 
 [[target.starknet-contract]]
 sierra = true
-casm = false
+casm = true
+
 
 [scripts]
 test = 'snforge test'
