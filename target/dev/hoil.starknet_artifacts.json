@@ -1,1 +1,0 @@
-{"version":1,"contracts":[{"id":"chjfcrrl1bpfo","package_name":"hoil","contract_name":"ILHedge","module_path":"hoil::interface::ILHedge","artifacts":{"sierra":"hoil_ILHedge.contract_class.json","casm":null}}]}

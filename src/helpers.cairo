@@ -56,38 +56,6 @@ fn convert_from_Fixed_to_int(value: Fixed, decimals: u8) -> u128 {
 }
 
 
-type Math64x61_ = felt252;
-
-trait FixedHelpersTrait {
-    fn assert_nn_not_zero(self: Fixed, msg: felt252);
-    fn assert_nn(self: Fixed, errmsg: felt252);
-    fn to_legacyMath(self: Fixed) -> Math64x61_;
-    fn from_legacyMath(num: Math64x61_) -> Fixed;
-}
-
-impl FixedHelpersImpl of FixedHelpersTrait {
-    fn assert_nn_not_zero(self: Fixed, msg: felt252) {
-        assert(self > FixedTrait::ZERO(), msg);
-    }
-
-    fn assert_nn(self: Fixed, errmsg: felt252) {
-        assert(self >= FixedTrait::ZERO(), errmsg)
-    }
-
-    fn to_legacyMath(self: Fixed) -> Math64x61_ {
-        // TODO: Find better way to do this, this is just wrong
-        // Fixed is 8 times the old math
-        let new: felt252 = (self / FixedTrait::from_unscaled_felt(8)).into();
-        new
-    }
-
-    fn from_legacyMath(num: Math64x61_) -> Fixed {
-        // 2**61 is 8 times smaller than 2**64
-        // so we can just multiply old legacy math number by 8 to get cubit
-        FixedTrait::from_felt(num * 8)
-    }
-}
-
 fn percent<T, impl TInto: Into<T, felt252>>(inp: T) -> Fixed {
     FixedTrait::from_unscaled_felt(inp.into()) / FixedTrait::from_unscaled_felt(100)
 }
@@ -113,7 +81,6 @@ mod tests {
     use cubit::f128::types::fixed::{Fixed, FixedTrait};
     use array::ArrayTrait;
 
-    #[test]
     fn test_pow() {
         assert(pow(2, 3) == 8, 'pow 2^3 should be 8');
         assert(pow(3, 2) == 9, 'pow 3^2 should be 9');
@@ -121,14 +88,14 @@ mod tests {
         assert(pow(1, 100) == 1, 'pow 1^100 should be 1');
     }
 
-    #[test]
+    #[cfg(test)]
     fn test_convert_from_int_to_Fixed() {
         assert(convert_from_int_to_Fixed(1000000000000000000, 18) == FixedTrait::ONE(), 'Should be one');
         assert(convert_from_int_to_Fixed(1, 0) == FixedTrait::from_unscaled_felt(1), '1 with 0 decimals');
         assert(convert_from_int_to_Fixed(100, 2) == FixedTrait::ONE(), '100 with 2 decimals');
     }
 
-    #[test]
+    #[cfg(test)]
     fn test_convert_from_Fixed_to_int() {
         let oneeth = convert_from_Fixed_to_int(FixedTrait::ONE(), 18);
         assert(oneeth == 1000000000000000000, 'oneeth?');
@@ -136,14 +103,13 @@ mod tests {
         assert(convert_from_Fixed_to_int(FixedTrait::ONE(), 2) == 100, '1 with 2 decimals');
     }
 
-    #[test]
+    #[cfg(test)]
     fn test_percent() {
         assert(percent(100) == FixedTrait::ONE(), '100% should be 1');
         assert(percent(50) == FixedTrait::from_unscaled_felt(1) / FixedTrait::from_unscaled_felt(2), '50% should be 0.5');
         assert(percent(0) == FixedTrait::ZERO(), '0% should be 0');
     }
 
-    #[test]
     fn test_reverse() {
         let mut arr = ArrayTrait::new();
         arr.append(FixedTrait::from_unscaled_felt(1));

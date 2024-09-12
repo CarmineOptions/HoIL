@@ -16,9 +16,7 @@ starknet = ">=2.7.0"
 sierra = true
 casm = true
 
-
 [scripts]
-test = 'snforge test'
+test = "snforge test"
 
-[tool.snforge]
 
