@@ -11,7 +11,7 @@ use hoil::helpers::convert_from_int_to_Fixed;
 use hoil::constants::{TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
 
 const PRAGMA_ORACLE_ADDRESS: felt252 =
-   0x0346c57f094d641ad94e43468628d8e9c574dcb2803ec372576ccc60a40be2c4; // mainnet
+    0x2a85bd616f912537c50a49a4076db02c00b29b2cdc8a197ce92ed1837fa875b; // mainnet
 
 const PRAGMA_ETH_USD_KEY: felt252 = 19514442401534788;
 
@@ -19,6 +19,15 @@ const PRAGMA_USDC_USD_KEY: felt252 = 6148332971638477636;
 
 const PRAGMA_STRK_USD_KEY: felt252 = 6004514686061859652;
 
+
+#[derive(Serde, Drop, Copy)]
+struct PragmaPricesResponse {
+    price: u128,
+    decimals: u32,
+    last_updated_timestamp: u64,
+    num_sources_aggregated: u32,
+    expiration_timestamp: Option<u64>,
+}
 
 
 #[derive(Copy, Drop, Serde)]
@@ -29,40 +38,52 @@ struct PragmaCheckpoint {
     num_sources_aggregated: felt252,
 }
 
-#[starknet::interface]
-trait IPragmaOracle<TContractState> {
-    fn get_spot_median(
-        self: @TContractState, pair_id: felt252
-    ) -> (felt252, felt252, felt252, felt252);
-    fn get_last_spot_checkpoint_before(
-        self: @TContractState, key: felt252, timestamp: felt252
-    ) -> (PragmaCheckpoint, felt252);
+
+#[derive(Drop, Copy, Serde)]
+enum DataType {
+    SpotEntry: felt252,
+    FutureEntry: (felt252, u64),
+    GenericEntry: felt252,
 }
 
 
+#[derive(Serde, Drop, Copy)]
+enum AggregationMode {
+    Median: (),
+    Mean: (),
+    Error: (),
+}
+
+
+#[starknet::interface]
+trait IPragmaOracle<TContractState> {
+    fn get_data(
+        self: @TContractState, data_type: DataType, aggregation_mode: AggregationMode
+    ) -> PragmaPricesResponse;
+}
+
+// @notice Returns current Pragma median price for given key
+// @dev This function does not account for stablecoin divergence
+// @param key: Pragma key identifier
+// @return median_price: Pragma current median price in Fixed
 fn _get_pragma_median_price(key: felt252) -> Fixed {
-    let (value, decimals, last_updated_timestamp, _) =
-        IPragmaOracleDispatcher {
+    let res: PragmaPricesResponse = IPragmaOracleDispatcher {
         contract_address: PRAGMA_ORACLE_ADDRESS.try_into().expect('Pragma/_GPMP - Cant convert')
     }
-        .get_spot_median(key);
+        .get_data(DataType::SpotEntry(key), AggregationMode::Median(()));
 
     let curr_time = get_block_timestamp();
-    let time_diff = if curr_time < last_updated_timestamp
-        .try_into()
-        .expect('Pragma/_GPMP - LUT too large') {
+    let time_diff = if curr_time < res.last_updated_timestamp {
         0
     } else {
-        curr_time - last_updated_timestamp.try_into().expect('Pragma/_GPMP - LUT too large')
+        curr_time - res.last_updated_timestamp
     };
 
-    assert(time_diff < 3600, 'Pragma/_GPMP - Price too old');
-    assert(
-        value.try_into().expect('Pragma/GPMP - Price too high') > 0_u128,
-        'Pragma/-GPMP - Price <= 0'
-    );
+    // assert(time_diff < 3600, 'Pragma/_GPMP - Price too old');
 
-    convert_from_int_to_Fixed(value.try_into().unwrap(), decimals.try_into().unwrap())
+    convert_from_int_to_Fixed(
+        res.price, res.decimals.try_into().expect('Pragma/_GPMP - decimals err')
+    )
 }
 
 // @notice Returns Pragma key identifier for spot pairs

@@ -46,7 +46,6 @@ fn test_compute_portfolio_value() {
 }
 
 
-// TODO FIGURE IT OUT
 // converts the excess to the hedge result asset (calls -> convert to eth)
 // ensures the call asset / put assset (based on calls bool) is equal to notional (or equivalent amount in puts)
 // returns amount of asset that isn't fixed
@@ -59,18 +58,18 @@ fn convert_excess(
     calls: bool
 ) -> Fixed {
     if calls {
-        assert(strike > entry_price, 'certainly calls?');
+        assert(strike > entry_price, 'strike<=entry price');
         assert(call_asset < notional, 'hedging at odd strikes, warning');
-        let extra_put_asset = if ((notional * entry_price) > put_asset) { // TODO understand
+        let extra_put_asset = if ((notional * entry_price) > put_asset) {
             (notional * entry_price) - put_asset
         } else {
             put_asset - (notional * entry_price)
         };
 
         (extra_put_asset / strike) + call_asset
-    } else { // DEBUG CURRENTLY HERE
-        assert(strike < entry_price, 'certainly puts?');
-        let extra_call_asset = if (call_asset > notional) { // I don't fucking get this.
+    } else {
+        assert(strike < entry_price, 'strike>=entry price');
+        let extra_call_asset = if (call_asset > notional) {
             call_asset - notional
         } else {
             notional - call_asset
