@@ -1,4 +1,4 @@
-use hoil::helpers::convert_from_int_to_Fixed;
+use hoil::helpers::{convert_from_int_to_Fixed, convert_from_Fixed_to_int};
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 use debug::PrintTrait;
@@ -8,14 +8,58 @@ fn compute_portfolio_value(curr_price: Fixed, notional: u128, calls: bool, strik
     let x = convert_from_int_to_Fixed(notional, 18);
     let y = x * curr_price;
     let k = x * y;
-
-    // price = y / x
-    // k = x * y
-    // 1500 = 3000 / 2
+    
     let y_at_strike = k.sqrt() * strike.sqrt();
     let x_at_strike = k.sqrt() / strike.sqrt();
+    
     convert_excess(x_at_strike, y_at_strike, x, strike, curr_price, calls)
 }
+
+// converts the excess to the hedge result asset (calls -> convert to eth)
+// ensures the call asset / put assset (based on calls bool) is equal to notional (or equivalent amount in puts)
+// returns amount of asset that isn't fixed
+fn convert_excess(
+    call_asset: Fixed,
+    put_asset: Fixed,
+    notional: Fixed,
+    strike: Fixed,
+    entry_price: Fixed,
+    calls: bool
+) -> Fixed {
+    if calls {
+        assert(strike > entry_price, 'strike<=entry price');
+        assert(call_asset < notional, 'hedging at odd strikes, warning');
+        let extra_put_asset = if ((notional * entry_price) > put_asset) {
+            (notional * entry_price) - put_asset
+        } else {
+            put_asset - (notional * entry_price)
+        };
+        let res: Fixed = (extra_put_asset / strike) + call_asset;
+        res
+    } else {
+        assert(strike < entry_price, 'strike>=entry price');
+        let extra_call_asset = if (call_asset > notional) {
+            call_asset - notional
+        } else {
+            notional - call_asset
+        };
+        let res: Fixed = (extra_call_asset * strike) + put_asset;
+        res
+    }
+}
+
+#[cfg(test)]
+fn test_convert_excess() {
+    let x_at_strike = FixedTrait::from_felt(0x10c7ebc96a119c8bd); // 1.0488088481662097
+    let y_at_strike = FixedTrait::from_felt(0x6253699028cfb2bd398); // 1573.2132722467607
+    let x = FixedTrait::from_felt(0x100000000000000000); // 1
+    let strike = FixedTrait::from_felt(0x5dc0000000000000000); // 1500
+    let curr_price = FixedTrait::from_felt(0x6720000000000000000); // 1650
+    let calls = false;
+    let res = convert_excess(x_at_strike, y_at_strike, x, strike, curr_price, calls);
+    res.print(); // 0x66e6d320524ee400704 = 1646.426544496075
+}
+
 
 use hoil::helpers::percent;
 #[cfg(test)]
@@ -43,49 +87,4 @@ fn test_compute_portfolio_value() {
     );
     assert(res < FixedTrait::ONE(), 'loss must happen due to IL');
     assert(res > percent(97), 'loss weirdly high');
-}
-
-
-// converts the excess to the hedge result asset (calls -> convert to eth)
-// ensures the call asset / put assset (based on calls bool) is equal to notional (or equivalent amount in puts)
-// returns amount of asset that isn't fixed
-fn convert_excess(
-    call_asset: Fixed,
-    put_asset: Fixed,
-    notional: Fixed,
-    strike: Fixed,
-    entry_price: Fixed,
-    calls: bool
-) -> Fixed {
-    if calls {
-        assert(strike > entry_price, 'strike<=entry price');
-        assert(call_asset < notional, 'hedging at odd strikes, warning');
-        let extra_put_asset = if ((notional * entry_price) > put_asset) {
-            (notional * entry_price) - put_asset
-        } else {
-            put_asset - (notional * entry_price)
-        };
-
-        (extra_put_asset / strike) + call_asset
-    } else {
-        assert(strike < entry_price, 'strike>=entry price');
-        let extra_call_asset = if (call_asset > notional) {
-            call_asset - notional
-        } else {
-            notional - call_asset
-        };
-        (extra_call_asset * strike) + put_asset
-    }
-}
-
-#[cfg(test)]
-fn test_convert_excess() {
-    let x_at_strike = FixedTrait::from_felt(0x10c7ebc96a119c8bd); // 1.0488088481662097
-    let y_at_strike = FixedTrait::from_felt(0x6253699028cfb2bd398); // 1573.2132722467607
-    let x = FixedTrait::from_felt(0x100000000000000000); // 1
-    let strike = FixedTrait::from_felt(0x5dc0000000000000000); // 1500
-    let curr_price = FixedTrait::from_felt(0x6720000000000000000); // 1650
-    let calls = false;
-    let res = convert_excess(x_at_strike, y_at_strike, x, strike, curr_price, calls);
-    res.print(); // 0x66e6d320524ee400704 = 1646.426544496075
 }

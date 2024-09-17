@@ -5,6 +5,7 @@ use array::ArrayTrait;
 use debug::PrintTrait;
 
 use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
+use hoil::helpers::convert_from_Fixed_to_int;
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
@@ -60,7 +61,6 @@ trait IAMM<TContractState> {
 // Helper functions
 fn buy_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: ContractAddress, quote_token_addr: ContractAddress) {
     let option_type = if calls { 0 } else { 1 };
-    // let amm_dispatcher = IAMM::dispatcher(AMM_ADDR);
     IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
     .trade_open(
         option_type,
@@ -92,7 +92,12 @@ fn price_option(
 
     let (_, after_fees) = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
         .get_total_premia(option, notional.into(), false);
-    after_fees.try_into().unwrap()
+    let res = if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
+        convert_from_Fixed_to_int(after_fees, 6).into()
+    } else {
+        convert_from_Fixed_to_int(after_fees, 18).into()
+    };
+    res
 }
 
 fn available_strikes(
@@ -115,7 +120,7 @@ fn available_strikes(
             break;
         }
         let option = *all_options.at(i);
-        if option.maturity == expiry && option.option_type == option_type {
+        if option.maturity == expiry && option.option_type == option_type && option.option_side == 0 {  // 0 for long
             res.append(option.strike_price);
         }
         i += 1;
