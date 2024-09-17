@@ -70,13 +70,11 @@ mod ILHedge {
                 @self, notional, quote_token_addr, base_token_addr, expiry
             );
             let (cost_quote, cost_base) = pricing;
-            let base_token = IERC20Dispatcher { contract_address: base_token_addr };
-            base_token.transferFrom(get_caller_address(), get_contract_address(), cost_base.into());
-            base_token.approve(AMM_ADDR.try_into().unwrap(), cost_base.into()); // approve AMM to spend
+            // let base_token = IERC20Dispatcher { contract_address: base_token_addr };
+            // base_token.approve(AMM_ADDR.try_into().unwrap(), 1000000000000000000_u256 ); // approve AMM to spend
 
-            let quote_token = IERC20Dispatcher { contract_address: quote_token_addr };
-            quote_token.transferFrom(get_caller_address(), get_contract_address(), cost_quote.into());
-            quote_token.approve(AMM_ADDR.try_into().unwrap(), cost_quote.into()); // approve AMM to spend
+            // let quote_token = IERC20Dispatcher { contract_address: quote_token_addr };
+            // quote_token.approve(AMM_ADDR.try_into().unwrap(), 1000000000000000000_u256); // approve AMM to spend
 
             let curr_price = get_pragma_median_price(quote_token_addr, base_token_addr);
             // iterate available strike prices and get them into pairs of (bought strike, at which strike one should be hedged)
