@@ -17,17 +17,14 @@ fn iterate_strike_prices(
     expiry: u64,
     calls: bool
 ) -> Span<(Fixed, Fixed)> {
-    let (MAX_HEDGE_CALLS, MAX_HEDGE_PUTS) = if base_token_addr.into() == TOKEN_ETH_ADDRESS {
+    let interval = if base_token_addr.into() == TOKEN_ETH_ADDRESS {
         if quote_token_addr.into() == TOKEN_USDC_ADDRESS {
-            (FixedTrait::from_unscaled_felt(3500), FixedTrait::from_unscaled_felt(1200))
+            FixedTrait::from_unscaled_felt(200)
         } else {
-            (FixedTrait::from_unscaled_felt(7800), FixedTrait::from_unscaled_felt(4000))
+            FixedTrait::from_unscaled_felt(300)
         }
     } else {
-        (
-            FixedTrait::from_unscaled_felt(7) / FixedTrait::from_unscaled_felt(10),
-            FixedTrait::from_unscaled_felt(2) / FixedTrait::from_unscaled_felt(10)
-        )
+        FixedTrait::from_unscaled_felt(5) / FixedTrait::from_unscaled_felt(100)
     };
 
     let mut strike_prices_arr = available_strikes(expiry, quote_token_addr, base_token_addr, calls);
@@ -43,9 +40,9 @@ fn iterate_strike_prices(
             res
                 .append(
                     (*strike_prices.at(i), if (calls) {
-                        MAX_HEDGE_CALLS
+                        *strike_prices.at(i) + interval
                     } else {
-                        MAX_HEDGE_PUTS
+                        *strike_prices.at(i) - interval
                     })
                 );
             break;
@@ -167,7 +164,6 @@ fn price_options_at_strike_to_hedge_at(
     let notional = how_many_options_at_strike_to_hedge_at(
         to_buy_strike, to_hedge_strike, payoff, calls
     );
-    //notional
     price_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr)
 }
 

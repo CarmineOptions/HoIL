@@ -36,7 +36,7 @@ mod ILHedge {
     use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
     use hoil::amm_curve::compute_portfolio_value;
-    use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
+    use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS};
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use hoil::hedging::{
         iterate_strike_prices,
@@ -65,6 +65,7 @@ mod ILHedge {
             base_token_addr: ContractAddress,
             expiry: u64
         ) {
+            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), 'NotImplementedYet');
             let pricing: (u128, u128) = Self::price_hedge(
                 @self, notional, quote_token_addr, base_token_addr, expiry
             );
@@ -82,6 +83,8 @@ mod ILHedge {
             let mut strikes_calls = iterate_strike_prices(
                 curr_price, quote_token_addr, base_token_addr, expiry, true
             );
+            
+            let mut already_hedged_calls: Fixed = FixedTrait::ZERO();
 
             loop {
                 match strikes_calls.pop_front() {
@@ -96,13 +99,13 @@ mod ILHedge {
                         assert(portf_val_calls > FixedTrait::ZERO(), 'portf val calls < 0?');
                         assert(portf_val_calls.sign == false, 'portf val neg??');
                         let notional_fixed = convert_from_int_to_Fixed(notional, 18);
-                        let amount_to_hedge = notional_fixed
-                            - portf_val_calls; // difference between converted and leftover amounts is how much one should be hedging against
-                        // buy this much of previous strike price (fst in iterate_strike_prices())
+                        let amount_to_hedge = (notional_fixed - portf_val_calls) - already_hedged_calls;
+                        already_hedged_calls += amount_to_hedge;
+                        let amount_to_hedge_quote = amount_to_hedge * curr_price;
                         buy_options_at_strike_to_hedge_at(
                             tobuy,
                             tohedge,
-                            amount_to_hedge,
+                            amount_to_hedge_quote,
                             expiry,
                             quote_token_addr,
                             base_token_addr,
@@ -114,6 +117,8 @@ mod ILHedge {
                     }
                 };
             };
+
+            let mut already_hedged_puts: Fixed = FixedTrait::ZERO();
 
             let mut strikes_puts = iterate_strike_prices(
                 curr_price, quote_token_addr, base_token_addr, expiry, false
@@ -134,13 +139,10 @@ mod ILHedge {
                             'some loss expected'
                         ); // portf_val_puts is in quote token
                         assert(portf_val_puts.sign == false, 'portf val neg??');
-                        let notional_fixed = if quote_token_addr == TOKEN_USDC_ADDRESS.try_into().unwrap() {
-                            convert_from_int_to_Fixed(notional, 6)
-                        } else {
-                            convert_from_int_to_Fixed(notional, 18)
-                        }; // difference between converted and premia amounts is how much one should be hedging against
-                        let amount_to_hedge = notional_fixed
-                            - portf_val_puts; // in quote token, with decimals
+                        let notional_fixed = convert_from_int_to_Fixed(notional, 18);
+                        let notional_in_quote = notional_fixed * curr_price;
+                        let amount_to_hedge = notional_in_quote - portf_val_puts - already_hedged_puts; // in quote token, with decimals
+                        already_hedged_puts += amount_to_hedge;
                         buy_options_at_strike_to_hedge_at(
                             tobuy,
                             tohedge,
@@ -177,6 +179,7 @@ mod ILHedge {
             base_token_addr: ContractAddress,
             expiry: u64
         ) -> (u128, u128) {
+            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), 'NotImplementedYet');
             let curr_price = get_pragma_median_price(quote_token_addr, base_token_addr);
 
             // iterate available strike prices and get them into pairs of (bought strike, at which strike one should be hedged)
@@ -187,7 +190,7 @@ mod ILHedge {
                 curr_price, quote_token_addr, base_token_addr, expiry, false
             );
 
-            let mut already_hedged: Fixed = FixedTrait::ZERO();
+            let mut already_hedged_calls: Fixed = FixedTrait::ZERO();
             let mut cost_quote = 0;
             let mut cost_base = 0;
 
@@ -207,11 +210,12 @@ mod ILHedge {
                             notional, 18
                         ); // difference between converted and premia amounts is how much one should be hedging against
                         //assert((notional_fixed - portf_val_calls) > already_hedged, "amounttohedge neg??"); // can't compile with it for some reason??
-                        let amount_to_hedge = (notional_fixed - portf_val_calls) - already_hedged;
-                        already_hedged += amount_to_hedge;
+                        let amount_to_hedge = (notional_fixed - portf_val_calls) - already_hedged_calls;
+                        already_hedged_calls += amount_to_hedge;
+                        let amount_to_hedge_quote = amount_to_hedge * curr_price;
                         cost_base +=
                             price_options_at_strike_to_hedge_at(
-                                tobuy, tohedge, amount_to_hedge, expiry, true, base_token_addr, quote_token_addr
+                                tobuy, tohedge, amount_to_hedge_quote, expiry, true, base_token_addr, quote_token_addr
                             );
                     },
                     Option::None(()) => {
@@ -219,6 +223,8 @@ mod ILHedge {
                     }
                 };
             };
+
+            let mut already_hedged_puts: Fixed = FixedTrait::ZERO();
             loop {
                 match strikes_puts.pop_front() {
                     Option::Some(strike_pair) => {
@@ -230,18 +236,11 @@ mod ILHedge {
                             curr_price, notional, false, tohedge
                         ); // value of second asset is precisely as much as user put in, expecting conversion
                         assert(portf_val_puts > FixedTrait::ZERO(), 'portf val puts < 0?');
-                        assert(
-                            portf_val_puts < (convert_from_int_to_Fixed(notional, 18) * curr_price),
-                            'some loss expected'
-                        ); // portf_val_puts is in quote token
                         assert(portf_val_puts.sign == false, 'portf val neg??');
-                        let notional_fixed = if quote_token_addr == TOKEN_USDC_ADDRESS.try_into().unwrap() {
-                            convert_from_int_to_Fixed(notional, 6)
-                        } else {
-                            convert_from_int_to_Fixed(notional, 18)
-                        }; // difference between converted and premia amounts is how much one should be hedging against
-                        let amount_to_hedge = notional_fixed
-                            - portf_val_puts; // in quote token, with decimals
+                        let notional_fixed = convert_from_int_to_Fixed(notional, 18);
+                        let notional_in_quote = notional_fixed * curr_price;
+                        let amount_to_hedge = notional_in_quote - portf_val_puts - already_hedged_puts; // in quote token, with decimals
+                        already_hedged_puts += amount_to_hedge;
                         cost_quote +=
                             price_options_at_strike_to_hedge_at(
                                 tobuy, tohedge, amount_to_hedge, expiry, false, base_token_addr, quote_token_addr
