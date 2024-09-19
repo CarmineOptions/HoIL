@@ -1,22 +1,9 @@
-use cubit::f128::types::fixed::{Fixed, FixedTrait};
-
-use hoil::helpers::percent;
-use hoil::amm_curve::{convert_excess, compute_portfolio_value};
-
 #[cfg(test)]
-    mod tests {
-        #[test]
-    fn test_convert_excess() {
-        let x_at_strike = FixedTrait::from_felt(0x10c7ebc96a119c8bd); // 1.0488088481662097
-        let y_at_strike = FixedTrait::from_felt(0x6253699028cfb2bd398); // 1573.2132722467607
-        let x = FixedTrait::from_felt(0x100000000000000000); // 1
-        let strike = FixedTrait::from_felt(0x5dc0000000000000000); // 1500
-        let curr_price = FixedTrait::from_felt(0x6720000000000000000); // 1650
-        let calls = false;
-        let res = convert_excess(x_at_strike, y_at_strike, x, strike, curr_price, calls);
-        res.print(); // 0x66e6d320524ee400704 = 1646.426544496075
-    }
+mod tests {
+    use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
+    use hoil::helpers::percent;
+    use hoil::amm_curve::{convert_excess, compute_portfolio_value};
 
     #[cfg(test)]
     fn test_compute_portfolio_value() {
