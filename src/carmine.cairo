@@ -55,7 +55,15 @@ trait IAMM<TContractState> {
     fn get_all_options(
         self: @TContractState,
          lptoken_address: ContractAddress
-    ) -> Array<Option>;  
+    ) -> Array<Option>; 
+
+    fn get_option_token_address(
+        self: @TContractState,
+        lptoken_address: ContractAddress,
+        option_side: u8,
+        maturity: u64,
+        strike_price: Fixed,
+    ) -> ContractAddress;
 }
 
 // Helper functions

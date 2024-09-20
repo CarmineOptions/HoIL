@@ -1,7 +1,5 @@
-use cubit::f128::types::fixed::{Fixed, FixedTrait};
-
 const TOKEN_ETH_ADDRESS: felt252 =
-    0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7; // mainnet & testnet. base token in case of eth/usdc
+    0x049d36570d4e46f48e99674bd3fcc84644ddd6b96f7c741b1562b82f9e004dc7;
 const TOKEN_USDC_ADDRESS: felt252 =
     0x053c91253bc9682c04929ca02ed00b3e423f6710d2ee7e0d5ebb06f3ecf368a8;
 const TOKEN_STRK_ADDRESS: felt252 = 
@@ -10,3 +8,6 @@ const TOKEN_BTC_ADDRESS: felt252 = 0x3fe2b97c1fd336e750087d68b9b867997fd64a2661f
 
 const AMM_ADDR: felt252 =
     0x47472e6755afc57ada9550b6a3ac93129cc4b5f98f51c73e0644d129fd208d9;
+
+const HOIL: felt252 = 0x038290ac85a923dd7b38c23cc1ec5b15853b76e2c3c02d367043685caecd2fc2;
+
