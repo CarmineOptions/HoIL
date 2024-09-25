@@ -97,7 +97,12 @@ fn adjust_for_rounding_condition(amount: u128, strike_price: Fixed, base_token_d
         let strike_price_u128: u128 = simple_cast_u256_to_u128(strike_price_u256);
         closest_value(amount, strike_price_u128, pow(10, (base_token_decimals - 4).into()))
     } else {
-        1_000_000_000_000_000_000
+        let (quot, rem) = integer::U128DivRem::div_rem(amount, 1_000_000_000_000_000_000);
+        if rem == 0 {
+            amount
+        } else {
+            (quot + 1) * 1_000_000_000_000_000_000
+        }
     }
 }
 
@@ -117,7 +122,10 @@ fn buy_options_at_strike_to_hedge_at(
     );
     if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
         let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);
-        buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr);
+        // if notional is lesser then 10^14 - trade is likely to end up failing on `prem incl fees is 0` on AMM side
+        if adj_notional > 100_000_000_000_000 {
+            buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr);
+        }
 
     } else {
         buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr);

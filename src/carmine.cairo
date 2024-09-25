@@ -5,7 +5,7 @@ use array::ArrayTrait;
 use debug::PrintTrait;
 
 use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
-use hoil::helpers::convert_from_Fixed_to_int;
+use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed};
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
@@ -69,6 +69,7 @@ trait IAMM<TContractState> {
 // Helper functions
 fn buy_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: ContractAddress, quote_token_addr: ContractAddress) {
     let option_type = if calls { 0 } else { 1 };
+    let premia = convert_from_int_to_Fixed(notional / 5,  18);
     IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
     .trade_open(
         option_type,
@@ -78,7 +79,7 @@ fn buy_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_toke
         notional.into(),
         quote_token_addr,
         base_token_addr,
-        (notional / 5).into(),
+        premia,
         (get_block_timestamp() + 42).into()
     );
 }

@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use hoil::helpers::{pow, convert_from_int_to_Fixed, convert_from_Fixed_to_int, percent, reverse};
+    use hoil::helpers::{pow, convert_from_int_to_Fixed, convert_from_Fixed_to_int, percent, reverse, toU256_balance};
     use cubit::f128::types::fixed::{Fixed, FixedTrait};
     use array::ArrayTrait;
 
@@ -44,5 +44,24 @@ mod tests {
         assert(*reversed.at(0) == FixedTrait::from_unscaled_felt(3), 'First element should be 3');
         assert(*reversed.at(1) == FixedTrait::from_unscaled_felt(2), 'Second element should be 2');
         assert(*reversed.at(2) == FixedTrait::from_unscaled_felt(1), 'Third element should be 1');
+    }
+
+    #[test]
+    fn test_toU256_balance() {
+        let res1 = toU256_balance(FixedTrait::ONE(), 18);
+        let res2 = toU256_balance(FixedTrait::from_unscaled_felt(50), 12);
+        let res3 = toU256_balance(FixedTrait::from_unscaled_felt(1_000), 6);
+
+        assert(res1 == 1000000000000000000, 'res1');
+        assert(res2 == 50000000000000, 'res2');
+        assert(res3 == 1000000000, 'res3');
+
+        let res4 = toU256_balance(FixedTrait::from_felt(998496246800754098506), 18);
+        let res5 = toU256_balance(FixedTrait::from_felt(20738488236427709357), 12);
+        let res6 = toU256_balance(FixedTrait::from_felt(1848056986831751282079825), 6);
+
+        assert(res4 == 54128589999999999999, 'res4'); // 1 gwei rounding error
+        assert(res5 == 1124235699999, 'res5'); // also
+        assert(res6 == 100183369999, 'res6'); // also
     }
 }
