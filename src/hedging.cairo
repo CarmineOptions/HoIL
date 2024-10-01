@@ -92,7 +92,7 @@ fn simple_cast_u256_to_u128(value: u256) -> u128 {
 fn adjust_for_rounding_condition(amount: u128, strike_price: Fixed, base_token_decimals: u8, quote_token_decimals: u8) -> u128 {
     // Convert strike_price to u256
     let strike_price_u256: u256 = toU256_balance(strike_price, quote_token_decimals.into()).into();
-    let (quot, rem) = integer::U256DivRem::div_rem(strike_price_u256, 10_000);
+    let (_, rem) = integer::U256DivRem::div_rem(strike_price_u256, 10_000);
     if rem == 0 {
         let strike_price_u128: u128 = simple_cast_u256_to_u128(strike_price_u256);
         closest_value(amount, strike_price_u128, pow(10, (base_token_decimals - 4).into()))
@@ -122,13 +122,17 @@ fn buy_options_at_strike_to_hedge_at(
     );
     if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
         let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);
-        // if notional is lesser then 10^14 - trade is likely to end up failing on `prem incl fees is 0` on AMM side
-        if adj_notional > 100_000_000_000_000 {
-            buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr);
+        let exp_price = price_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr);
+        if exp_price != 0 {
+            buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 6);
         }
-
+    } else if !calls {
+        let exp_price = price_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr);
+        if exp_price != 0 {
+            buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 18);
+        }
     } else {
-        buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr);
+        buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::None, 18);
     }
 }
 

@@ -11,7 +11,7 @@ use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
 
 #[derive(Copy, Drop, Serde, starknet::Store)]
-struct Option {
+struct CarmOption {
     option_side: u8,
     maturity: u64,
     strike_price: Fixed,
@@ -40,7 +40,7 @@ trait IAMM<TContractState> {
 
     fn get_total_premia(
         self: @TContractState,
-        option: Option,
+        option: CarmOption,
         position_size: u256,
         is_closing: bool,
     ) -> (Fixed, Fixed);
@@ -55,7 +55,7 @@ trait IAMM<TContractState> {
     fn get_all_options(
         self: @TContractState,
          lptoken_address: ContractAddress
-    ) -> Array<Option>; 
+    ) -> Array<CarmOption>; 
 
     fn get_option_token_address(
         self: @TContractState,
@@ -67,9 +67,22 @@ trait IAMM<TContractState> {
 }
 
 // Helper functions
-fn buy_option(strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: ContractAddress, quote_token_addr: ContractAddress) {
+fn buy_option(
+    strike: Fixed,
+    notional: u128,
+    expiry: u64,
+    calls: bool,
+    base_token_addr: ContractAddress,
+    quote_token_addr: ContractAddress,
+    exp_price: Option<u128>,
+    quote_token_decimals: u8
+) {
     let option_type = if calls { 0 } else { 1 };
-    let premia = convert_from_int_to_Fixed(notional / 5,  18);
+    let premia = match exp_price {
+        Option::Some(value) => convert_from_int_to_Fixed(value * 12 / 10, quote_token_decimals),
+        Option::None => convert_from_int_to_Fixed(notional / 5,  18),
+    };
+
     IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
     .trade_open(
         option_type,
@@ -90,7 +103,7 @@ fn price_option(
     // let lpt_addr_felt: ContractAddress = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
     //     .get_lptoken_address_for_given_option(quote_token_addr.try_into().unwrap(), base_token_addr.try_into().unwrap(), option_type);
 
-    let option = Option {
+    let option = CarmOption {
         option_side: 0,
         maturity: expiry.into(),
         strike_price: strike,
@@ -134,5 +147,6 @@ fn available_strikes(
         }
         i += 1;
     };
+    assert(res.len() > 0, 'Options for hedge unavail.');
     res
 }
