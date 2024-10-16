@@ -12,6 +12,7 @@ trait IILHedge<TContractState> {
         quote_token_addr: ContractAddress,
         base_token_addr: ContractAddress,
         expiry: u64,
+        limit_price: (u128, u128),
         hedge_at_price: Option<Fixed>
     );
     fn hedge_close(
@@ -105,13 +106,20 @@ mod ILHedge {
             quote_token_addr: ContractAddress,
             base_token_addr: ContractAddress,
             expiry: u64,
+            limit_price: (u128, u128),
             hedge_at_price: Option<Fixed>
         ) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), 'NotImplementedYet');
+            
             let pricing: (u128, u128) = Self::price_hedge(
                 @self, notional, quote_token_addr, base_token_addr, expiry, hedge_at_price
             );
             let (cost_quote, cost_base) = pricing;
+
+            // check is price does not violate slippage limit
+            let (limit_quote, limit_base) = limit_price;
+            assert(cost_quote <= limit_quote, 'Quote cost exceeds limit');
+            assert(cost_base <= limit_base, 'Base cost exceeds limit');
 
             let caller = get_caller_address();
             let contract_address = starknet::get_contract_address();
