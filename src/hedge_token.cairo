@@ -1,7 +1,7 @@
 use starknet::ContractAddress;
 use array::ArrayTrait;
 
-#[derive(Drop, Serde)]
+#[derive(Drop, Serde, Copy)]
 struct OptionToken {
     address: ContractAddress,
     amount: u256
@@ -10,16 +10,25 @@ struct OptionToken {
 #[starknet::interface]
 trait IHedgeToken<TContractState> {
     fn name(self: @TContractState) -> felt252;
+    fn safe_transfer_single_token(
+        ref self: TContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        token_id: u256
+    );
     fn mint_hedge_token(
         ref self: TContractState,
         to: ContractAddress,
-        assigned_tokens: Array<(ContractAddress, u256)>,
+        assigned_tokens: Array<OptionToken>,
         uri: felt252
     ) -> u256;
 
-    fn burn_hedge_token(ref self: TContractState, token_id: u256);
+    fn burn_hedge_token(ref self: TContractState, token_id: u256) -> Array<OptionToken>;
 
     fn get_assigned_tokens(self: @TContractState, token_id: u256) -> Array<OptionToken>;
+    fn quote_token_address(self: @TContractState, token_id: u256) -> ContractAddress;
+    fn base_token_address(self: @TContractState, token_id: u256) -> ContractAddress;
+    fn maturity(self: @TContractState, token_id: u256) -> u64;
 }
 
 #[starknet::contract]
@@ -86,6 +95,15 @@ mod HedgeToken {
             self.name.read()
         }
 
+        fn safe_transfer_single_token(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            token_id: u256
+        ) {
+            self.erc1155.safe_transfer_from(from, to, token_id, 1, ArrayTrait::new().span())
+        }
+
         fn get_assigned_tokens(self: @ContractState, token_id: u256) -> Array<OptionToken> {
             let mut result = ArrayTrait::new();
             let length = self.token_option_addresses_length.read(token_id);
@@ -101,10 +119,28 @@ mod HedgeToken {
             result
         }
 
+        fn maturity(self: @ContractState, token_id: u256) -> u64 {
+            let option_tokens: Array<OptionToken> = self.get_assigned_tokens(token_id);
+            let option_token: OptionToken = *option_tokens.at(0);
+            IERC20Dispatcher { contract_address: option_token.address}.maturity()
+        }
+
+        fn base_token_address(self: @ContractState, token_id: u256) -> ContractAddress {
+            let option_tokens: Array<OptionToken> = self.get_assigned_tokens(token_id);
+            let option_token: OptionToken = *option_tokens.at(0);
+            IERC20Dispatcher { contract_address: option_token.address}.base_token_address()
+        }
+
+        fn quote_token_address(self: @ContractState, token_id: u256) -> ContractAddress {
+            let option_tokens: Array<OptionToken> = self.get_assigned_tokens(token_id);
+            let option_token: OptionToken = *option_tokens.at(0);
+            IERC20Dispatcher { contract_address: option_token.address}.quote_token_address()
+        }
+
         fn mint_hedge_token(
             ref self: ContractState,
             to: ContractAddress,
-            assigned_tokens: Array<(ContractAddress, u256)>,
+            assigned_tokens: Array<OptionToken>,
             uri: felt252
         ) -> u256 {
             let amount = 1;
@@ -122,14 +158,14 @@ mod HedgeToken {
             let mut index = 0_u32;
             loop {
                 match assigned_tokens_span.pop_front() {
-                    Option::Some((token_address, token_amount)) => {
-                        let token = IERC20Dispatcher { contract_address: *token_address };
-                        assert(*token_amount > 0, 'MHT: neg.amount provided');
+                    Option::Some(option_token) => {
+                        let token = IERC20Dispatcher { contract_address: *option_token.address };
+                        assert(*option_token.amount > 0, 'MHT: neg.amount provided');
                         // Transfer the fungible tokens from the caller to this contract
-                        token.transferFrom( caller, starknet::get_contract_address(), *token_amount);
+                        token.transferFrom( caller, starknet::get_contract_address(), *option_token.amount);
                         // Record the assignment
-                        self.option_tokens.write((token_id, *token_address), *token_amount);
-                        self.token_option_addresses.write((token_id, index), *token_address);
+                        self.option_tokens.write((token_id, *option_token.address), *option_token.amount);
+                        self.token_option_addresses.write((token_id, index), *option_token.address);
                         index += 1;
                     },
                     Option::None => { break; },
@@ -141,9 +177,11 @@ mod HedgeToken {
             token_id
         }
 
-        fn burn_hedge_token(ref self: ContractState, token_id: u256) {
+        fn burn_hedge_token(ref self: ContractState, token_id: u256) -> Array<OptionToken> {
             let amount = 1;
             let caller = get_caller_address();
+            let mut returned_tokens: Array<OptionToken> = ArrayTrait::new();
+
         
             // Check if the caller has enough tokens to burn
             let caller_balance = self.erc1155.balance_of(caller, token_id);
@@ -183,12 +221,14 @@ mod HedgeToken {
                             self.option_tokens.write((token_id, option_address), 0);
                         }
                     }
+                    returned_tokens.append( OptionToken { address: option_address, amount: burn_amount});
                 }
                 i += 1;
             };
             if burn_ratio >= 1 {
                 self.token_option_addresses_length.write(token_id, 0);
             }
+            returned_tokens
         }
     }
 

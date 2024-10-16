@@ -6,6 +6,7 @@ use debug::PrintTrait;
 
 use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
 use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed};
+use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
@@ -38,6 +39,30 @@ trait IAMM<TContractState> {
         tx_deadline: u64,
     ) -> Fixed;
 
+    fn trade_close(
+        ref self: TContractState,
+        option_type: u8,
+        strike_price: Fixed,
+        maturity: u64,
+        option_side: u8,
+        option_size: u128,
+        quote_token_address: ContractAddress,
+        base_token_address: ContractAddress,
+        limit_total_premia: Fixed,
+        tx_deadline: u64,
+    ) -> Fixed;
+
+    fn trade_settle(
+        ref self: TContractState,
+        option_type: u8,
+        strike_price: Fixed,
+        maturity: u64,
+        option_side: u8,
+        option_size: u128,
+        quote_token_address: ContractAddress,
+        base_token_address: ContractAddress,
+    );
+
     fn get_total_premia(
         self: @TContractState,
         option: CarmOption,
@@ -66,6 +91,48 @@ trait IAMM<TContractState> {
     ) -> ContractAddress;
 }
 
+fn close_option_position(address: ContractAddress, amount: u256) {
+    let token_disp = IERC20Dispatcher { contract_address: address };
+    let option_type: u8 = token_disp.option_type();
+    let strike_price: Fixed = token_disp.strike_price();
+    let maturity: u64 = token_disp.maturity();
+    let quote_token_address: ContractAddress = token_disp.quote_token_address();
+    let base_token_address: ContractAddress = token_disp.base_token_address();
+
+    let amm_disp = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() };
+    amm_disp.trade_close(
+        option_type,
+        strike_price,
+        maturity.into(),
+        0,
+        amount.try_into().unwrap(),
+        quote_token_address,
+        base_token_address,
+        FixedTrait::ONE(),  // close options regardless of premia 
+        (get_block_timestamp() + 42).into()
+    );
+}
+
+fn settle_option_position(address: ContractAddress, amount: u256) {
+    let token_disp = IERC20Dispatcher { contract_address: address };
+    let option_type: u8 = token_disp.option_type();
+    let strike_price: Fixed = token_disp.strike_price();
+    let maturity: u64 = token_disp.maturity();
+    let quote_token_address: ContractAddress = token_disp.quote_token_address();
+    let base_token_address: ContractAddress = token_disp.base_token_address();
+
+    let amm_disp = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() };
+    amm_disp.trade_settle(
+        option_type,
+        strike_price,
+        maturity.into(),
+        0,
+        amount.try_into().unwrap(),
+        quote_token_address,
+        base_token_address
+    );
+}
+
 // Helper functions
 fn buy_option(
     strike: Fixed,
@@ -79,6 +146,7 @@ fn buy_option(
 ) {
     let option_type = if calls { 0 } else { 1 };
     let premia = match exp_price {
+        // figure it out TODO
         Option::Some(value) => convert_from_int_to_Fixed(value * 12 / 10, quote_token_decimals),
         Option::None => convert_from_int_to_Fixed(notional / 5,  18),
     };

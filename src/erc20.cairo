@@ -1,4 +1,5 @@
 use starknet::ContractAddress;
+use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
 #[starknet::interface]
 trait IERC20<TContractState> {
@@ -15,4 +16,12 @@ trait IERC20<TContractState> {
         ref self: TContractState, sender: ContractAddress, recipient: ContractAddress, amount: u256
     ) -> bool;
     fn approve(ref self: TContractState, spender: ContractAddress, amount: u256) -> bool;
+
+    // option token specific functions
+    fn quote_token_address(self: @TContractState) -> ContractAddress;
+    fn base_token_address(self: @TContractState) -> ContractAddress;
+    fn option_type(self: @TContractState) -> u8;
+    fn strike_price(self: @TContractState) -> Fixed;
+    fn maturity(self: @TContractState) -> u64;
+    fn side(self: @TContractState) -> u8;
 }
