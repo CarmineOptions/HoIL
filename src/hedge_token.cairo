@@ -146,7 +146,7 @@ mod HedgeToken {
             let amount = 1;
             let caller = get_caller_address();
             // TODO assert caller is allowed to mint/burn
-            // assert(caller == HOIL.try_into().unwrap(), 'Unautorized to mint');
+            assert(caller == HOIL.try_into().unwrap(), 'Unautorized to mint');
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
 
@@ -180,20 +180,16 @@ mod HedgeToken {
         fn burn_hedge_token(ref self: ContractState, token_id: u256) -> Array<OptionToken> {
             let amount = 1;
             let caller = get_caller_address();
+            assert(caller == HOIL.try_into().unwrap(), 'Unautorized to burn');
             let mut returned_tokens: Array<OptionToken> = ArrayTrait::new();
 
         
             // Check if the caller has enough tokens to burn
             let caller_balance = self.erc1155.balance_of(caller, token_id);
-            assert(caller_balance >= amount, 'BHT: Not an owner');
-
-            // Get the total supply before burning
-            // TODO replace with other constant
-            let total_supply = 1;
-            assert(total_supply >= amount, 'BHT: Amount exceeds supply');
+            assert(caller_balance >= 1, 'BHT: Not an owner');
 
             // Burn the hedge tokens
-            self.erc1155.burn(caller, token_id, amount);
+            self.erc1155.burn(caller, token_id, 1);
 
             let burn_ratio = amount / total_supply;
         
@@ -203,26 +199,10 @@ mod HedgeToken {
             while (i < length) {
                 let option_address = self.token_option_addresses.read((token_id, i));
                 let option_amount = self.option_tokens.read((token_id, option_address));
-                
-                if option_amount > 0 {
-                    let burn_amount = (option_amount * burn_ratio);
-                    let new_amount = option_amount - burn_amount;
-
-                    if burn_amount > 0 {
-                        // Transfer the tokens back to the caller
-                        let token = IERC20Dispatcher { contract_address: option_address };
-                        token.transfer(caller, burn_amount);
-                    
-                        if new_amount > 0 {
-                            // Update amount
-                            self.option_tokens.write((token_id, option_address), new_amount);
-                        } else {
-                            // Remove this token completely
-                            self.option_tokens.write((token_id, option_address), 0);
-                        }
-                    }
-                    returned_tokens.append( OptionToken { address: option_address, amount: burn_amount});
-                }
+                let token = IERC20Dispatcher { contract_address: option_address };
+                token.transfer(caller, option_amount);
+                self.option_tokens.write((token_id, option_address), 0);
+                returned_tokens.append( OptionToken { address: option_address, amount: option_amount});
                 i += 1;
             };
             if burn_ratio >= 1 {
