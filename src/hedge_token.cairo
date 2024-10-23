@@ -1,4 +1,4 @@
-use starknet::ContractAddress;
+use starknet::{ContractAddress, ClassHash};
 use array::ArrayTrait;
 
 #[derive(Drop, Serde, Copy)]
@@ -19,8 +19,7 @@ trait IHedgeToken<TContractState> {
     fn mint_hedge_token(
         ref self: TContractState,
         to: ContractAddress,
-        assigned_tokens: Array<OptionToken>,
-        uri: felt252
+        assigned_tokens: Array<OptionToken>
     ) -> u256;
 
     fn burn_hedge_token(ref self: TContractState, token_id: u256) -> Array<OptionToken>;
@@ -29,6 +28,7 @@ trait IHedgeToken<TContractState> {
     fn quote_token_address(self: @TContractState, token_id: u256) -> ContractAddress;
     fn base_token_address(self: @TContractState, token_id: u256) -> ContractAddress;
     fn maturity(self: @TContractState, token_id: u256) -> u64;
+    fn upgrade(ref self: TContractState, impl_hash: ClassHash);
 }
 
 #[starknet::contract]
@@ -37,11 +37,16 @@ mod HedgeToken {
     use openzeppelin::token::erc1155::ERC1155Component;
     use openzeppelin::token::erc1155::ERC1155HooksEmptyImpl;
     use openzeppelin::token::erc20::interface::IERC20;
+    use openzeppelin::token::erc1155::interface::ERC1155ABI;
+    use openzeppelin::introspection::src5::SRC5Component::SRC5Impl;
+
     use starknet::storage::Map;
-    use starknet::{ContractAddress, get_caller_address};
+    use starknet::{ContractAddress, ClassHash, get_caller_address};
+    use starknet::syscalls::{replace_class_syscall};
     use option::OptionTrait;
     use array::ArrayTrait;
     use traits::Into;
+
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use hoil::constants::HOIL;
     use super::OptionToken;
@@ -49,8 +54,8 @@ mod HedgeToken {
     component!(path: ERC1155Component, storage: erc1155, event: ERC1155Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
-    #[abi(embed_v0)]
-    impl ERC1155MixinImpl = ERC1155Component::ERC1155MixinImpl<ContractState>;
+    // #[abi(embed_v0)]
+    // impl ERC1155MixinImpl = ERC1155Component::ERC1155MixinImpl<ContractState>;
 
     impl ERC1155InternalImpl = ERC1155Component::InternalImpl<ContractState>;
 
@@ -61,11 +66,11 @@ mod HedgeToken {
         option_tokens: Map::<(u256, ContractAddress), u256>,
         token_option_addresses_length: Map::<u256, u32>,
         token_option_addresses: Map::<(u256, u32), ContractAddress>,
-        uris: Map::<u256, felt252>,
         next_token_id: u256,
         #[substorage(v0)]
         src5: SRC5Component::Storage,
-        name: felt252
+        name: felt252,
+        owner: ContractAddress
     }
 
     #[event]
@@ -77,23 +82,131 @@ mod HedgeToken {
         SRC5Event: SRC5Component::Event
     }
 
-    #[starknet::interface]
-    trait IERC1155MetadataURI<TContractState> {
-        fn uri(self: @TContractState, token_id: u256) -> felt252;
-    }
+    #[abi(embed_v0)]
+    impl ERC1155MixinImpl of ERC1155ABI<ContractState> {
+        fn safe_transfer_from(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            token_id: u256,
+            data: Span<felt252>
+        ) {
+            self.erc1155.safe_transfer_from(from, to, token_id, 1_u256, data)
+        }
 
-    impl ERC1155MetadataURIImpl of IERC1155MetadataURI<ContractState> {
-        fn uri(self: @ContractState, token_id: u256) -> felt252 {
-            self.uris.read(token_id)
+        // Rest of ERC1155Mixin functions - delegate to erc1155 component
+        fn balance_of(self: @ContractState, account: ContractAddress, token_id: u256) -> u256 {
+            self.erc1155.balance_of(account, token_id)
+        }
+
+        fn balance_of_batch(
+            self: @ContractState,
+            accounts: Span<ContractAddress>,
+            token_ids: Span<u256>
+        ) -> Span<u256> {
+            self.erc1155.balance_of_batch(accounts, token_ids)
+        }
+
+        fn is_approved_for_all(
+            self: @ContractState, 
+            owner: ContractAddress, 
+            operator: ContractAddress
+        ) -> bool {
+            self.erc1155.is_approved_for_all(owner, operator)
+        }
+
+        fn set_approval_for_all(
+            ref self: ContractState, 
+            operator: ContractAddress, 
+            approved: bool
+        ) {
+            self.erc1155.set_approval_for_all(operator, approved)
+        }
+
+        fn safe_batch_transfer_from(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            token_ids: Span<u256>,
+            values: Span<u256>,
+            data: Span<felt252>
+        ) {
+            self.erc1155.safe_batch_transfer_from(from, to, token_ids, values, data)
+        }
+
+        // ISRC5 functions
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> bool {
+            self.src5.supports_interface(interface_id)
+        }
+
+        // URI function
+        fn uri(self: @ContractState, token_id: u256) -> ByteArray {
+            self.erc1155.uri(token_id)
+        }
+
+        // Camel case versions
+        fn balanceOf(self: @ContractState, account: ContractAddress, tokenId: u256) -> u256 {
+            self.balance_of(account, tokenId)
+        }
+
+        fn balanceOfBatch(
+            self: @ContractState,
+            accounts: Span<ContractAddress>,
+            tokenIds: Span<u256>
+        ) -> Span<u256> {
+            self.balance_of_batch(accounts, tokenIds)
+        }
+
+        fn setApprovalForAll(ref self: ContractState, operator: ContractAddress, approved: bool) {
+            self.set_approval_for_all(operator, approved)
+        }
+
+        fn isApprovedForAll(
+            self: @ContractState,
+            owner: ContractAddress,
+            operator: ContractAddress
+        ) -> bool {
+            self.is_approved_for_all(owner, operator)
+        }
+
+        fn safeTransferFrom(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            tokenId: u256,
+            value: u256,
+            data: Span<felt252>
+        ) {
+            self.safe_transfer_from(from, to, tokenId, value, data)
+        }
+
+        fn safeBatchTransferFrom(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            tokenIds: Span<u256>,
+            values: Span<u256>,
+            data: Span<felt252>
+        ) {
+            self.safe_batch_transfer_from(from, to, tokenIds, values, data)
         }
     }
-
 
     #[abi(embed_v0)]
     impl HedgeTokenImpl of super::IHedgeToken<ContractState> {
         fn name(self: @ContractState) -> felt252 {
             self.name.read()
         }
+
+        fn upgrade(ref self: ContractState, impl_hash: ClassHash) {
+            let caller: ContractAddress = get_caller_address();
+            let owner: ContractAddress = self.owner.read();
+            // self.erc1155.initializer("www.mock.url/{id}");
+            assert(owner == caller, 'invalid caller');
+            assert(!impl_hash.is_zero(), 'Class hash cannot be zero');
+            replace_class_syscall(impl_hash).unwrap();
+        }
+
 
         fn safe_transfer_single_token(
             ref self: ContractState,
@@ -140,13 +253,12 @@ mod HedgeToken {
         fn mint_hedge_token(
             ref self: ContractState,
             to: ContractAddress,
-            assigned_tokens: Array<OptionToken>,
-            uri: felt252
+            assigned_tokens: Array<OptionToken>
         ) -> u256 {
             let amount = 1;
             let caller = get_caller_address();
             // TODO assert caller is allowed to mint/burn
-            assert(caller == HOIL.try_into().unwrap(), 'Unautorized to mint');
+            // assert(caller == HOIL.try_into().unwrap(), 'Unautorized to mint');
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
 
@@ -172,17 +284,15 @@ mod HedgeToken {
                 };
             };
             self.token_option_addresses_length.write(token_id, index);
-            self.uris.write(token_id, uri);
+            // self.uris.write(token_id, uri);
 
             token_id
         }
 
         fn burn_hedge_token(ref self: ContractState, token_id: u256) -> Array<OptionToken> {
-            let amount = 1;
             let caller = get_caller_address();
-            assert(caller == HOIL.try_into().unwrap(), 'Unautorized to burn');
+            // assert(caller == HOIL.try_into().unwrap(), 'Unautorized to burn');
             let mut returned_tokens: Array<OptionToken> = ArrayTrait::new();
-
         
             // Check if the caller has enough tokens to burn
             let caller_balance = self.erc1155.balance_of(caller, token_id);
@@ -190,8 +300,6 @@ mod HedgeToken {
 
             // Burn the hedge tokens
             self.erc1155.burn(caller, token_id, 1);
-
-            let burn_ratio = amount / total_supply;
         
             // Return the proportional amount of option tokens
             let length = self.token_option_addresses_length.read(token_id);
@@ -202,20 +310,20 @@ mod HedgeToken {
                 let token = IERC20Dispatcher { contract_address: option_address };
                 token.transfer(caller, option_amount);
                 self.option_tokens.write((token_id, option_address), 0);
+                self.token_option_addresses_length.write(token_id, 0);
                 returned_tokens.append( OptionToken { address: option_address, amount: option_amount});
                 i += 1;
             };
-            if burn_ratio >= 1 {
-                self.token_option_addresses_length.write(token_id, 0);
-            }
             returned_tokens
         }
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState) {
-        self.name.write('HoIL Token');
-        self.erc1155.initializer("www.mock.url");
+    fn constructor(ref self: ContractState, owner: ContractAddress) {
+        self.name.write('PAIL Token');
+        self.owner.write(owner);
+        self.erc1155.initializer("api.carmine.finance/api/v1/mainnet/hedge?token_id={id}");
+        // self.base_uri.write(ByteArray::from_string("www.mock.url/"));
         self.next_token_id.write(1); // Start token IDs from 1
     }
 }
