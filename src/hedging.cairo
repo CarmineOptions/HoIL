@@ -119,24 +119,26 @@ fn buy_options_at_strike_to_hedge_at(
     quote_token_addr: ContractAddress,
     base_token_addr: ContractAddress,
     calls: bool
-) {
+) -> u128 {
     let notional = how_many_options_at_strike_to_hedge_at(
         to_buy_strike, to_hedge_strike, payoff, calls
     );
-    if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
+    let option_recieved = if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
         let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);
         let exp_price = price_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr);
         if exp_price != 0 {
-            buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 6);
-        }
+            buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 6)
+        } else {0}
     } else if !calls {
         let exp_price = price_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr);
         if exp_price != 0 {
-            buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 18);
-        }
+            buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 18)
+        } else {0}
     } else {
-        buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::None, 18);
-    }
+        buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::None, 18)
+    };
+
+    option_recieved
 }
 
 fn price_options_at_strike_to_hedge_at(
@@ -168,7 +170,7 @@ fn hedge_finalize(
     let hedge_token_dispatcher = IHedgeTokenDispatcher { contract_address: HEDGE_TOKEN_ADDRESS.try_into().unwrap()};
 
     // Transfer the hedge token from caller to this contract
-    hedge_token_dispatcher.safe_transfer_single_token(caller, contract_address, token_id);
+    hedge_token_dispatcher.safe_transfer_from(caller, contract_address, token_id,  ArrayTrait::new().span());
 
     // Get addresses of each token in hedged pair
     let base_token_address = hedge_token_dispatcher.base_token_address(token_id);

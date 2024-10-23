@@ -10,18 +10,11 @@ struct OptionToken {
 #[starknet::interface]
 trait IHedgeToken<TContractState> {
     fn name(self: @TContractState) -> felt252;
-    fn safe_transfer_single_token(
-        ref self: TContractState,
-        from: ContractAddress,
-        to: ContractAddress,
-        token_id: u256
-    );
     fn mint_hedge_token(
         ref self: TContractState,
         to: ContractAddress,
         assigned_tokens: Array<OptionToken>
     ) -> u256;
-
     fn burn_hedge_token(ref self: TContractState, token_id: u256) -> Array<OptionToken>;
 
     fn get_assigned_tokens(self: @TContractState, token_id: u256) -> Array<OptionToken>;
@@ -29,6 +22,59 @@ trait IHedgeToken<TContractState> {
     fn base_token_address(self: @TContractState, token_id: u256) -> ContractAddress;
     fn maturity(self: @TContractState, token_id: u256) -> u64;
     fn upgrade(ref self: TContractState, impl_hash: ClassHash);
+
+    // erc1155
+    fn has_hedge(self: @TContractState, account: ContractAddress) -> Array<u256>;
+    fn balance_of(self: @TContractState, account: ContractAddress, token_id: u256) -> u256;
+    fn balance_of_batch(
+        self: @TContractState, accounts: Span<ContractAddress>, token_ids: Span<u256>
+    ) -> Span<u256>;
+    fn safe_transfer_from(
+        ref self: TContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        token_id: u256,
+        data: Span<felt252>
+    );
+    fn safe_batch_transfer_from(
+        ref self: TContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        token_ids: Span<u256>,
+        data: Span<felt252>
+    );
+    fn is_approved_for_all(
+        self: @TContractState, owner: ContractAddress, operator: ContractAddress
+    ) -> bool;
+    fn set_approval_for_all(ref self: TContractState, operator: ContractAddress, approved: bool);
+
+    // ISRC5
+    fn supports_interface(self: @TContractState, interface_id: felt252) -> bool;
+
+    // IERC1155MetadataURI
+    fn uri(self: @TContractState, token_id: u256) -> ByteArray;
+
+    // IERC1155Camel
+    fn balanceOf(self: @TContractState, account: ContractAddress, tokenId: u256) -> u256;
+    fn balanceOfBatch(
+        self: @TContractState, accounts: Span<ContractAddress>, tokenIds: Span<u256>
+    ) -> Span<u256>;
+    fn safeTransferFrom(
+        ref self: TContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        tokenId: u256,
+        data: Span<felt252>
+    );
+    fn safeBatchTransferFrom(
+        ref self: TContractState,
+        from: ContractAddress,
+        to: ContractAddress,
+        tokenIds: Span<u256>,
+        data: Span<felt252>
+    );
+    fn isApprovedForAll(self: @TContractState, owner: ContractAddress, operator: ContractAddress) -> bool;
+    fn setApprovalForAll(ref self: TContractState, operator: ContractAddress, approved: bool);
 }
 
 #[starknet::contract]
@@ -83,116 +129,6 @@ mod HedgeToken {
     }
 
     #[abi(embed_v0)]
-    impl ERC1155MixinImpl of ERC1155ABI<ContractState> {
-        fn safe_transfer_from(
-            ref self: ContractState,
-            from: ContractAddress,
-            to: ContractAddress,
-            token_id: u256,
-            data: Span<felt252>
-        ) {
-            self.erc1155.safe_transfer_from(from, to, token_id, 1_u256, data)
-        }
-
-        // Rest of ERC1155Mixin functions - delegate to erc1155 component
-        fn balance_of(self: @ContractState, account: ContractAddress, token_id: u256) -> u256 {
-            self.erc1155.balance_of(account, token_id)
-        }
-
-        fn balance_of_batch(
-            self: @ContractState,
-            accounts: Span<ContractAddress>,
-            token_ids: Span<u256>
-        ) -> Span<u256> {
-            self.erc1155.balance_of_batch(accounts, token_ids)
-        }
-
-        fn is_approved_for_all(
-            self: @ContractState, 
-            owner: ContractAddress, 
-            operator: ContractAddress
-        ) -> bool {
-            self.erc1155.is_approved_for_all(owner, operator)
-        }
-
-        fn set_approval_for_all(
-            ref self: ContractState, 
-            operator: ContractAddress, 
-            approved: bool
-        ) {
-            self.erc1155.set_approval_for_all(operator, approved)
-        }
-
-        fn safe_batch_transfer_from(
-            ref self: ContractState,
-            from: ContractAddress,
-            to: ContractAddress,
-            token_ids: Span<u256>,
-            values: Span<u256>,
-            data: Span<felt252>
-        ) {
-            self.erc1155.safe_batch_transfer_from(from, to, token_ids, values, data)
-        }
-
-        // ISRC5 functions
-        fn supports_interface(self: @ContractState, interface_id: felt252) -> bool {
-            self.src5.supports_interface(interface_id)
-        }
-
-        // URI function
-        fn uri(self: @ContractState, token_id: u256) -> ByteArray {
-            self.erc1155.uri(token_id)
-        }
-
-        // Camel case versions
-        fn balanceOf(self: @ContractState, account: ContractAddress, tokenId: u256) -> u256 {
-            self.balance_of(account, tokenId)
-        }
-
-        fn balanceOfBatch(
-            self: @ContractState,
-            accounts: Span<ContractAddress>,
-            tokenIds: Span<u256>
-        ) -> Span<u256> {
-            self.balance_of_batch(accounts, tokenIds)
-        }
-
-        fn setApprovalForAll(ref self: ContractState, operator: ContractAddress, approved: bool) {
-            self.set_approval_for_all(operator, approved)
-        }
-
-        fn isApprovedForAll(
-            self: @ContractState,
-            owner: ContractAddress,
-            operator: ContractAddress
-        ) -> bool {
-            self.is_approved_for_all(owner, operator)
-        }
-
-        fn safeTransferFrom(
-            ref self: ContractState,
-            from: ContractAddress,
-            to: ContractAddress,
-            tokenId: u256,
-            value: u256,
-            data: Span<felt252>
-        ) {
-            self.safe_transfer_from(from, to, tokenId, value, data)
-        }
-
-        fn safeBatchTransferFrom(
-            ref self: ContractState,
-            from: ContractAddress,
-            to: ContractAddress,
-            tokenIds: Span<u256>,
-            values: Span<u256>,
-            data: Span<felt252>
-        ) {
-            self.safe_batch_transfer_from(from, to, tokenIds, values, data)
-        }
-    }
-
-    #[abi(embed_v0)]
     impl HedgeTokenImpl of super::IHedgeToken<ContractState> {
         fn name(self: @ContractState) -> felt252 {
             self.name.read()
@@ -201,20 +137,9 @@ mod HedgeToken {
         fn upgrade(ref self: ContractState, impl_hash: ClassHash) {
             let caller: ContractAddress = get_caller_address();
             let owner: ContractAddress = self.owner.read();
-            // self.erc1155.initializer("www.mock.url/{id}");
             assert(owner == caller, 'invalid caller');
             assert(!impl_hash.is_zero(), 'Class hash cannot be zero');
             replace_class_syscall(impl_hash).unwrap();
-        }
-
-
-        fn safe_transfer_single_token(
-            ref self: ContractState,
-            from: ContractAddress,
-            to: ContractAddress,
-            token_id: u256
-        ) {
-            self.erc1155.safe_transfer_from(from, to, token_id, 1, ArrayTrait::new().span())
         }
 
         fn get_assigned_tokens(self: @ContractState, token_id: u256) -> Array<OptionToken> {
@@ -272,13 +197,15 @@ mod HedgeToken {
                 match assigned_tokens_span.pop_front() {
                     Option::Some(option_token) => {
                         let token = IERC20Dispatcher { contract_address: *option_token.address };
-                        assert(*option_token.amount > 0, 'MHT: neg.amount provided');
+                        assert(*option_token.amount >= 0, 'MHT: neg.amount provided');
                         // Transfer the fungible tokens from the caller to this contract
-                        token.transferFrom( caller, starknet::get_contract_address(), *option_token.amount);
-                        // Record the assignment
-                        self.option_tokens.write((token_id, *option_token.address), *option_token.amount);
-                        self.token_option_addresses.write((token_id, index), *option_token.address);
-                        index += 1;
+                        if *option_token.amount != 0 {
+                            token.transferFrom(HOIL.try_into().unwrap(), starknet::get_contract_address(), *option_token.amount);
+                            // Record the assignment
+                            self.option_tokens.write((token_id, *option_token.address), *option_token.amount);
+                            self.token_option_addresses.write((token_id, index), *option_token.address);
+                            index += 1;
+                        }
                     },
                     Option::None => { break; },
                 };
@@ -315,6 +242,143 @@ mod HedgeToken {
                 i += 1;
             };
             returned_tokens
+        }
+
+        fn has_hedge(self: @ContractState, account: ContractAddress) -> Array<u256> {
+            let mut result: Array<u256> = ArrayTrait::new();
+            let last_token_id = self.next_token_id.read();
+            let mut current_id: u256 = 1;
+            
+            loop {
+                if current_id >= last_token_id {
+                    break;
+                }
+                
+                let balance = self.erc1155.balance_of(account, current_id);
+                if balance == 1 {
+                    result.append(current_id);
+                }
+                
+                current_id = current_id + 1;
+            };
+            
+            result
+        }
+
+        fn safe_transfer_from(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            token_id: u256,
+            data: Span<felt252>
+        ) {
+            self.erc1155.safe_transfer_from(from, to, token_id, 1_u256, data)
+        }
+
+        // Rest of ERC1155Mixin functions - delegate to erc1155 component
+        fn balance_of(self: @ContractState, account: ContractAddress, token_id: u256) -> u256 {
+            self.erc1155.balance_of(account, token_id)
+        }
+
+        fn balance_of_batch(
+            self: @ContractState,
+            accounts: Span<ContractAddress>,
+            token_ids: Span<u256>
+        ) -> Span<u256> {
+            self.erc1155.balance_of_batch(accounts, token_ids)
+        }
+
+        fn is_approved_for_all(
+            self: @ContractState, 
+            owner: ContractAddress, 
+            operator: ContractAddress
+        ) -> bool {
+            self.erc1155.is_approved_for_all(owner, operator)
+        }
+
+        fn set_approval_for_all(
+            ref self: ContractState, 
+            operator: ContractAddress, 
+            approved: bool
+        ) {
+            self.erc1155.set_approval_for_all(operator, approved)
+        }
+
+        fn safe_batch_transfer_from(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            token_ids: Span<u256>,
+            data: Span<felt252>
+        ) {
+            // Create array of ones
+            let mut ones = ArrayTrait::new();
+            let mut i: usize = 0;
+            let len = token_ids.len();
+            
+            loop {
+                if i == len {
+                    break;
+                }
+                ones.append(1_u256);
+                i += 1;
+            };
+            self.erc1155.safe_batch_transfer_from(from, to, token_ids, ones.span(), data)
+        }
+
+        // ISRC5 functions
+        fn supports_interface(self: @ContractState, interface_id: felt252) -> bool {
+            self.src5.supports_interface(interface_id)
+        }
+
+        // URI function
+        fn uri(self: @ContractState, token_id: u256) -> ByteArray {
+            self.erc1155.uri(token_id)
+        }
+
+        // Camel case versions
+        fn balanceOf(self: @ContractState, account: ContractAddress, tokenId: u256) -> u256 {
+            self.balance_of(account, tokenId)
+        }
+
+        fn balanceOfBatch(
+            self: @ContractState,
+            accounts: Span<ContractAddress>,
+            tokenIds: Span<u256>
+        ) -> Span<u256> {
+            self.balance_of_batch(accounts, tokenIds)
+        }
+
+        fn setApprovalForAll(ref self: ContractState, operator: ContractAddress, approved: bool) {
+            self.set_approval_for_all(operator, approved)
+        }
+
+        fn isApprovedForAll(
+            self: @ContractState,
+            owner: ContractAddress,
+            operator: ContractAddress
+        ) -> bool {
+            self.is_approved_for_all(owner, operator)
+        }
+
+        fn safeTransferFrom(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            tokenId: u256,
+            data: Span<felt252>
+        ) {
+            self.safe_transfer_from(from, to, tokenId, data)
+        }
+
+        fn safeBatchTransferFrom(
+            ref self: ContractState,
+            from: ContractAddress,
+            to: ContractAddress,
+            tokenIds: Span<u256>,
+            data: Span<felt252>
+        ) {
+            self.safe_batch_transfer_from(from, to, tokenIds, data)
         }
     }
 
