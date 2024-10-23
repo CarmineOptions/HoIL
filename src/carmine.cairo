@@ -108,7 +108,7 @@ fn close_option_position(address: ContractAddress, amount: u256) {
         amount.try_into().unwrap(),
         quote_token_address,
         base_token_address,
-        FixedTrait::ONE(),  // close options regardless of premia 
+        convert_from_int_to_Fixed(1, 18),  // close options regardless of premia 
         (get_block_timestamp() + 42).into()
     );
 }
@@ -143,13 +143,21 @@ fn buy_option(
     quote_token_addr: ContractAddress,
     exp_price: Option<u128>,
     quote_token_decimals: u8
-) {
+) -> u128 {
     let option_type = if calls { 0 } else { 1 };
     let premia = match exp_price {
         // figure it out TODO
         Option::Some(value) => convert_from_int_to_Fixed(value * 12 / 10, quote_token_decimals),
         Option::None => convert_from_int_to_Fixed(notional / 5,  18),
     };
+    // 'opt_type'.print();
+    // option_type.print();
+    // 'strike'.print();
+    // strike.print();
+    // 'maturity'.print();
+    // expiry.print();
+    // 'notional'.print();
+    // notional.print();
 
     IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
     .trade_open(
@@ -163,6 +171,8 @@ fn buy_option(
         premia,
         (get_block_timestamp() + 42).into()
     );
+
+    notional
 }
 
 fn price_option(

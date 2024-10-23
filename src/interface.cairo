@@ -6,6 +6,7 @@ use cubit::f128::types::fixed::Fixed;
 
 #[starknet::interface]
 trait IILHedge<TContractState> {
+    fn name(self: @TContractState) -> felt252;
     fn hedge_open(
         ref self: TContractState,
         notional: u128,
@@ -13,7 +14,7 @@ trait IILHedge<TContractState> {
         base_token_addr: ContractAddress,
         expiry: u64,
         limit_price: (u128, u128),
-        hedge_at_price: Option<Fixed>
+        hedge_at_price: Fixed
     );
     fn hedge_close(
         ref self: TContractState,
@@ -29,10 +30,11 @@ trait IILHedge<TContractState> {
         quote_token_addr: ContractAddress,
         base_token_addr: ContractAddress,
         expiry: u64,
-        hedge_at_price: Option<Fixed>
+        hedge_at_price: Fixed
     ) -> (u128, u128);
     fn upgrade(ref self: TContractState, impl_hash: ClassHash);
     fn get_owner(self: @TContractState) -> ContractAddress;
+    // fn supports_interface(self: @TContractState, interface_id: felt252) -> bool;
 }
 
 #[starknet::contract]
@@ -41,12 +43,14 @@ mod ILHedge {
     use option::OptionTrait;
     use traits::{Into, TryInto};
 
-    use starknet::ContractAddress;
-    use starknet::ClassHash;
-    use starknet::{get_caller_address, get_contract_address};
+    use starknet::{get_caller_address, get_contract_address, ClassHash, ContractAddress};
     use starknet::syscalls::{replace_class_syscall};
 
     use cubit::f128::types::fixed::{Fixed, FixedTrait};
+    use openzeppelin::introspection::src5::SRC5Component;
+    use openzeppelin::introspection::src5::SRC5Component::InternalTrait;
+    use openzeppelin::introspection::interface::{ISRC5, ISRC5_ID};
+    use openzeppelin::account::interface::ISRC6_ID;
 
     use hoil::amm_curve::compute_portfolio_value;
     use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, HEDGE_TOKEN_ADDRESS};
@@ -61,10 +65,15 @@ mod ILHedge {
     use hoil::pragma::get_pragma_median_price;
     use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed};
     use hoil::hedge_token::{OptionToken, IHedgeTokenDispatcher, IHedgeTokenDispatcherTrait};
+    
+    component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     #[storage]
     struct Storage {
         owner: ContractAddress,
+        name: felt252,
+        #[substorage(v0)]
+        src5: SRC5Component::Storage,
     }
 
     #[event]
@@ -73,6 +82,8 @@ mod ILHedge {
         HedgeOpened: HedgeOpenedEvent,
         HedgeClosed: HedgeFinalizedEvent,
         HedgeSettled: HedgeFinalizedEvent,
+        #[flat]
+        SRC5Event: SRC5Component::Event
     }
 
     #[derive(Drop, starknet::Event)]
@@ -93,13 +104,23 @@ mod ILHedge {
         hedge_token_id: u256,
     }
 
+    #[abi(embed_v0)]
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+
     #[constructor]
     fn constructor(ref self: ContractState, owner: ContractAddress) {
         self.owner.write(owner);
+        self.name.write('Protection against IL');
+        SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC5_ID);
+        SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC6_ID);
     }
 
     #[abi(embed_v0)]
     impl ILHedge of super::IILHedge<ContractState> {
+        fn name(self: @ContractState) -> felt252 {
+            self.name.read()
+        }
+
         fn hedge_open(
             ref self: ContractState,
             notional: u128,
@@ -107,10 +128,9 @@ mod ILHedge {
             base_token_addr: ContractAddress,
             expiry: u64,
             limit_price: (u128, u128),
-            hedge_at_price: Option<Fixed>
+            hedge_at_price: Fixed
         ) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), 'NotImplementedYet');
-            
             let pricing: (u128, u128) = Self::price_hedge(
                 @self, notional, quote_token_addr, base_token_addr, expiry, hedge_at_price
             );
@@ -139,10 +159,12 @@ mod ILHedge {
             quote_token.approve(AMM_ADDR.try_into().unwrap(), cost_quote.into() * 105 / 100);
 
             // Use hedge_at_price if provided, otherwise get the price from Pragma
-            let curr_price = match hedge_at_price {
-                Option::Some(price) => price,
-                Option::None => get_pragma_median_price(quote_token_addr, base_token_addr)
+            let curr_price = if (hedge_at_price <= FixedTrait::ZERO()) {
+                get_pragma_median_price(quote_token_addr, base_token_addr)
+            } else {
+                hedge_at_price
             };
+            assert(curr_price > FixedTrait::ZERO(), 'Cant hedge at price <= 0');
 
             let mut option_tokens: Array<OptionToken> = ArrayTrait::new();
 
@@ -175,9 +197,9 @@ mod ILHedge {
                         let lpt_addr: ContractAddress = amm.get_lptoken_address_for_given_option(quote_token_addr, base_token_addr, 0);
                         let option_token = amm.get_option_token_address(lpt_addr, 0, expiry, tobuy);
                         let option_token_dispatcher = IERC20Dispatcher { contract_address: option_token };
-                        let initial_option_balance = option_token_dispatcher.balanceOf(contract_address);
+                        // let initial_option_balance = option_token_dispatcher.balanceOf(contract_address);
                         // buy call option
-                        buy_options_at_strike_to_hedge_at(
+                        let amount = buy_options_at_strike_to_hedge_at(
                             tobuy,
                             tohedge,
                             amount_to_hedge_quote,
@@ -186,11 +208,12 @@ mod ILHedge {
                             base_token_addr,
                             true
                         );
-                        let new_option_balance = option_token_dispatcher.balanceOf(contract_address);
+                        // let new_option_balance = option_token_dispatcher.balanceOf(contract_address);
 
                         // Transfer options to the user
                         // option_token_dispatcher.transfer(caller, new_option_balance - initial_option_balance);
-                        let amount = new_option_balance - initial_option_balance;
+                        // let amount = new_option_balance - initial_option_balance;
+                        option_token_dispatcher.approve(HEDGE_TOKEN_ADDRESS.try_into().unwrap(), amount.into());
                         option_tokens.append(OptionToken { address: option_token, amount: amount.into() });
                     },
                     Option::None(()) => {
@@ -233,10 +256,10 @@ mod ILHedge {
                         let lpt_addr: ContractAddress = amm.get_lptoken_address_for_given_option(quote_token_addr, base_token_addr, 1);
                         let option_token = amm.get_option_token_address(lpt_addr, 0, expiry, tobuy);
                         let option_token_dispatcher = IERC20Dispatcher { contract_address: option_token };
-                        let initial_option_balance = option_token_dispatcher.balanceOf(contract_address);
+                        // let initial_option_balance = option_token_dispatcher.balanceOf(contract_address);
 
                         // buy put option
-                        buy_options_at_strike_to_hedge_at(
+                        let amount = buy_options_at_strike_to_hedge_at(
                             tobuy,
                             tohedge,
                             amount_to_hedge,
@@ -246,11 +269,12 @@ mod ILHedge {
                             false
                         );
 
-                        let new_option_balance = option_token_dispatcher.balanceOf(contract_address);
+                        // let new_option_balance = option_token_dispatcher.balanceOf(contract_address);
 
                         // Transfer options to the user
                         // option_token_dispatcher.transfer(caller, new_option_balance - initial_option_balance);
-                        let amount = new_option_balance - initial_option_balance;
+                        // let amount = new_option_balance - initial_option_balance;
+                        option_token_dispatcher.approve(HEDGE_TOKEN_ADDRESS.try_into().unwrap(), amount.into());
                         option_tokens.append(OptionToken { address: option_token, amount: amount.into() });
                     },
                     Option::None(()) => {
@@ -272,7 +296,7 @@ mod ILHedge {
             quote_token.transfer(caller, quote_token_leftovers);
 
             let hedge_token_dispatcher = IHedgeTokenDispatcher { contract_address: HEDGE_TOKEN_ADDRESS.try_into().unwrap()};
-            let hedge_token_id = hedge_token_dispatcher.mint_hedge_token(caller, option_tokens, '');
+            let hedge_token_id = hedge_token_dispatcher.mint_hedge_token(caller, option_tokens);
 
             // Emit the HedgeOpened event
             self.emit(Event::HedgeOpened(HedgeOpenedEvent {
@@ -311,11 +335,14 @@ mod ILHedge {
             }));
         }
 
-
         fn upgrade(ref self: ContractState, impl_hash: ClassHash) {
             let caller: ContractAddress = get_caller_address();
             let owner: ContractAddress = self.owner.read();
             assert(owner == caller, 'invalid caller');
+            self.name.write('Protection against IL');
+            SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC5_ID);
+            SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC6_ID);
+
             assert(!impl_hash.is_zero(), 'Class hash cannot be zero');
             replace_class_syscall(impl_hash).unwrap();
         }
@@ -331,13 +358,14 @@ mod ILHedge {
             quote_token_addr: ContractAddress,
             base_token_addr: ContractAddress,
             expiry: u64,
-            hedge_at_price: Option<Fixed>
+            hedge_at_price: Fixed
         ) -> (u128, u128) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), 'NotImplementedYet');
             // Use hedge_at_price if provided, otherwise get the price from Pragma
-            let curr_price = match hedge_at_price {
-                Option::Some(price) => price,
-                Option::None => get_pragma_median_price(quote_token_addr, base_token_addr)
+            let curr_price = if (hedge_at_price <= FixedTrait::ZERO()) {
+                get_pragma_median_price(quote_token_addr, base_token_addr)
+            } else {
+                hedge_at_price
             };
             assert(curr_price > FixedTrait::ZERO(), 'Cant hedge at price <= 0');
 
