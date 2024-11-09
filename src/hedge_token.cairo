@@ -2,7 +2,7 @@ use starknet::{ContractAddress, ClassHash};
 use array::ArrayTrait;
 
 #[derive(Drop, Serde, Copy)]
-struct OptionToken {
+struct OptionAmount {
     address: ContractAddress,
     amount: u256
 }
@@ -13,11 +13,11 @@ trait IHedgeToken<TContractState> {
     fn mint_hedge_token(
         ref self: TContractState,
         to: ContractAddress,
-        assigned_tokens: Array<OptionToken>
+        assigned_tokens: Array<OptionAmount>
     ) -> u256;
-    fn burn_hedge_token(ref self: TContractState, token_id: u256) -> Array<OptionToken>;
+    fn burn_hedge_token(ref self: TContractState, token_id: u256) -> Array<OptionAmount>;
 
-    fn get_assigned_tokens(self: @TContractState, token_id: u256) -> Array<OptionToken>;
+    fn get_assigned_tokens(self: @TContractState, token_id: u256) -> Array<OptionAmount>;
     fn quote_token_address(self: @TContractState, token_id: u256) -> ContractAddress;
     fn base_token_address(self: @TContractState, token_id: u256) -> ContractAddress;
     fn maturity(self: @TContractState, token_id: u256) -> u64;
@@ -52,7 +52,10 @@ trait IHedgeToken<TContractState> {
     fn supports_interface(self: @TContractState, interface_id: felt252) -> bool;
 
     // IERC1155MetadataURI
-    fn uri(self: @TContractState, token_id: u256) -> ByteArray;
+    fn uri(self: @TContractState, token_id: u256) -> ByteArray; // Array<felt252>;
+    // fn uri(self: @TContractState, token_id: u256) -> (felt252, felt252, felt252);
+    fn token_uri(self: @TContractState, token_id: u256) -> ByteArray;
+    fn tokenUri(self: @TContractState, tokenId: u256) -> ByteArray;
 
     // IERC1155Camel
     fn balanceOf(self: @TContractState, account: ContractAddress, tokenId: u256) -> u256;
@@ -95,7 +98,7 @@ mod HedgeToken {
 
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use hoil::constants::HOIL;
-    use super::OptionToken;
+    use super::OptionAmount;
 
     component!(path: ERC1155Component, storage: erc1155, event: ERC1155Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -140,9 +143,10 @@ mod HedgeToken {
             assert(owner == caller, 'invalid caller');
             assert(!impl_hash.is_zero(), 'Class hash cannot be zero');
             replace_class_syscall(impl_hash).unwrap();
+            self.erc1155.initializer("api.carmine.finance/api/v1/mainnet/hedge?token_id=1");
         }
 
-        fn get_assigned_tokens(self: @ContractState, token_id: u256) -> Array<OptionToken> {
+        fn get_assigned_tokens(self: @ContractState, token_id: u256) -> Array<OptionAmount> {
             let mut result = ArrayTrait::new();
             let length = self.token_option_addresses_length.read(token_id);
             let mut i = 0_u32;
@@ -150,7 +154,7 @@ mod HedgeToken {
                 let address = self.token_option_addresses.read((token_id, i));
                 let amount = self.option_tokens.read((token_id, address));
                 if amount > 0 {
-                    result.append(OptionToken { address, amount });
+                    result.append(OptionAmount { address, amount });
                 }
                 i += 1;
             };
@@ -158,27 +162,27 @@ mod HedgeToken {
         }
 
         fn maturity(self: @ContractState, token_id: u256) -> u64 {
-            let option_tokens: Array<OptionToken> = self.get_assigned_tokens(token_id);
-            let option_token: OptionToken = *option_tokens.at(0);
+            let option_tokens: Array<OptionAmount> = self.get_assigned_tokens(token_id);
+            let option_token: OptionAmount = *option_tokens.at(0);
             IERC20Dispatcher { contract_address: option_token.address}.maturity()
         }
 
         fn base_token_address(self: @ContractState, token_id: u256) -> ContractAddress {
-            let option_tokens: Array<OptionToken> = self.get_assigned_tokens(token_id);
-            let option_token: OptionToken = *option_tokens.at(0);
+            let option_tokens: Array<OptionAmount> = self.get_assigned_tokens(token_id);
+            let option_token: OptionAmount = *option_tokens.at(0);
             IERC20Dispatcher { contract_address: option_token.address}.base_token_address()
         }
 
         fn quote_token_address(self: @ContractState, token_id: u256) -> ContractAddress {
-            let option_tokens: Array<OptionToken> = self.get_assigned_tokens(token_id);
-            let option_token: OptionToken = *option_tokens.at(0);
+            let option_tokens: Array<OptionAmount> = self.get_assigned_tokens(token_id);
+            let option_token: OptionAmount = *option_tokens.at(0);
             IERC20Dispatcher { contract_address: option_token.address}.quote_token_address()
         }
 
         fn mint_hedge_token(
             ref self: ContractState,
             to: ContractAddress,
-            assigned_tokens: Array<OptionToken>
+            assigned_tokens: Array<OptionAmount>
         ) -> u256 {
             let amount = 1;
             let caller = get_caller_address();
@@ -216,10 +220,10 @@ mod HedgeToken {
             token_id
         }
 
-        fn burn_hedge_token(ref self: ContractState, token_id: u256) -> Array<OptionToken> {
+        fn burn_hedge_token(ref self: ContractState, token_id: u256) -> Array<OptionAmount> {
             let caller = get_caller_address();
             // assert(caller == HOIL.try_into().unwrap(), 'Unautorized to burn');
-            let mut returned_tokens: Array<OptionToken> = ArrayTrait::new();
+            let mut returned_tokens: Array<OptionAmount> = ArrayTrait::new();
         
             // Check if the caller has enough tokens to burn
             let caller_balance = self.erc1155.balance_of(caller, token_id);
@@ -238,7 +242,7 @@ mod HedgeToken {
                 token.transfer(caller, option_amount);
                 self.option_tokens.write((token_id, option_address), 0);
                 self.token_option_addresses_length.write(token_id, 0);
-                returned_tokens.append( OptionToken { address: option_address, amount: option_amount});
+                returned_tokens.append( OptionAmount { address: option_address, amount: option_amount});
                 i += 1;
             };
             returned_tokens
@@ -336,6 +340,30 @@ mod HedgeToken {
             self.erc1155.uri(token_id)
         }
 
+        fn token_uri(self: @ContractState, token_id: u256) -> ByteArray {
+            self.uri(token_id)
+        }
+
+        fn tokenUri(self: @ContractState, tokenId: u256) -> ByteArray {
+            self.uri(tokenId)
+        }
+
+        // fn uri(self: @ContractState, token_id: u256) -> (felt252, felt252, felt252) {
+        //     // let mut result: Array<felt252> = ArrayTrait::new();
+        //     let base_uri: felt252 = 'api.carmine.finance/api/';
+        //     let base_uri2: felt252 = 'v1/mainnet/hedge?token_id=';
+        //     // base_uri.print();
+        //     // Add base URI
+        //     // result.append(base_uri);
+        //     // result.append(base_uri2);
+            
+        //     // Convert token_id to felt252 and append
+        //     let token_id_felt: felt252 = token_id.try_into().unwrap_or(0);
+        //     // result.append(token_id_felt);
+            
+        //     (base_uri, base_uri2, token_id_felt)
+        // }
+
         // Camel case versions
         fn balanceOf(self: @ContractState, account: ContractAddress, tokenId: u256) -> u256 {
             self.balance_of(account, tokenId)
@@ -386,7 +414,7 @@ mod HedgeToken {
     fn constructor(ref self: ContractState, owner: ContractAddress) {
         self.name.write('PAIL Token');
         self.owner.write(owner);
-        self.erc1155.initializer("api.carmine.finance/api/v1/mainnet/hedge?token_id={id}");
+        self.erc1155.initializer("api.carmine.finance/api/v1/mainnet/hedge?token_id=1");
         // self.base_uri.write(ByteArray::from_string("www.mock.url/"));
         self.next_token_id.write(1); // Start token IDs from 1
     }

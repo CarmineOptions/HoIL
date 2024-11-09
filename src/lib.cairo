@@ -7,3 +7,5 @@ mod erc20;
 mod pragma;
 mod interface;
 mod hedge_token;
+mod errors;
+mod utils;

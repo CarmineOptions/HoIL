@@ -7,10 +7,10 @@ use option::OptionTrait;
 use alexandria_sorting::merge_sort::merge;
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
-use hoil::carmine::{available_strikes, buy_option, price_option, close_option_position, settle_option_position};
+use hoil::carmine::{available_strikes, buy_option, price_option, close_option_position, settle_option_position, CarmOptionWithSize};
 use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed, reverse, pow, toU256_balance, closest_value};
 use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, HEDGE_TOKEN_ADDRESS};
-use hoil::hedge_token::{OptionToken, IHedgeTokenDispatcher, IHedgeTokenDispatcherTrait};
+use hoil::hedge_token::{OptionAmount, IHedgeTokenDispatcher, IHedgeTokenDispatcherTrait};
 use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
 
 use starknet::{ContractAddress, get_caller_address};
@@ -111,35 +111,35 @@ fn adjust_for_rounding_condition(amount: u128, strike_price: Fixed, base_token_d
 
 // Calculates how much to buy at buystrike to get specified payoff at hedgestrike.
 // And buys via carmine module.
-fn buy_options_at_strike_to_hedge_at(
-    to_buy_strike: Fixed,
-    to_hedge_strike: Fixed,
-    payoff: Fixed,
-    expiry: u64,
-    quote_token_addr: ContractAddress,
-    base_token_addr: ContractAddress,
-    calls: bool
-) -> u128 {
-    let notional = how_many_options_at_strike_to_hedge_at(
-        to_buy_strike, to_hedge_strike, payoff, calls
-    );
-    let option_recieved = if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
-        let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);
-        let exp_price = price_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr);
-        if exp_price != 0 {
-            buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 6)
-        } else {0}
-    } else if !calls {
-        let exp_price = price_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr);
-        if exp_price != 0 {
-            buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 18)
-        } else {0}
-    } else {
-        buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::None, 18)
-    };
+// fn buy_options_at_strike_to_hedge_at(
+//     to_buy_strike: Fixed,
+//     to_hedge_strike: Fixed,
+//     payoff: Fixed,
+//     expiry: u64,
+//     quote_token_addr: ContractAddress,
+//     base_token_addr: ContractAddress,
+//     calls: bool
+// ) -> u128 {
+//     let notional = how_many_options_at_strike_to_hedge_at(
+//         to_buy_strike, to_hedge_strike, payoff, calls
+//     );
+//     let option_recieved = if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
+//         let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);
+//         let exp_price = price_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr);
+//         if exp_price != 0 {
+//             buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 6)
+//         } else {0}
+//     } else if !calls {
+//         let exp_price = price_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr);
+//         if exp_price != 0 {
+//             buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::Some(exp_price), 18)
+//         } else {0}
+//     } else {
+//         buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr, Option::None, 18)
+//     };
 
-    option_recieved
-}
+//     option_recieved
+// }
 
 fn price_options_at_strike_to_hedge_at(
     to_buy_strike: Fixed,
@@ -149,12 +149,12 @@ fn price_options_at_strike_to_hedge_at(
     calls: bool, 
     base_token_addr: ContractAddress, 
     quote_token_addr: ContractAddress
-) -> u128 {
+) -> CarmOptionWithSize {
     let notional = how_many_options_at_strike_to_hedge_at(
         to_buy_strike, to_hedge_strike, payoff, calls
     );
     if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
-        let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);
+        let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);  // TODO use function get_decimal
         price_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr, quote_token_addr)
     } else {
         price_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr)
@@ -183,7 +183,7 @@ fn hedge_finalize(
     let initial_quote_token_balance = quote_token_disp.balanceOf(contract_address);
 
     // execute hedge token burn, that will result in transfering all assigned option tokens to current contract
-    let options_to_close: Array<OptionToken> = hedge_token_dispatcher.burn_hedge_token(token_id);
+    let options_to_close: Array<OptionAmount> = hedge_token_dispatcher.burn_hedge_token(token_id);
 
     let mut options_to_close_span = options_to_close.span();
     let mut index = 0_u32;

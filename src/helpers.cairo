@@ -4,8 +4,46 @@ use array::ArrayTrait;
 use traits::Into;
 use integer::u128_safe_divmod;
 use debug::PrintTrait;
+use starknet::ContractAddress;
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
+
+use hoil::constants::{TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, TOKEN_EKUBO_ADDRESS};
+use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+use hoil::errors::Errors;
+
+// @notice Get decimal count for the given token
+// @dev 18 for ETH, STRK, EKUBO, 6 for USDC, 8 for WBTC
+// @param token_address: Address of the token for which decimals are being retrieved
+// @return dec: Decimal count
+fn get_decimal(token_address: ContractAddress) -> u8 {
+    if token_address == TOKEN_ETH_ADDRESS.try_into().unwrap() {
+        return 18;
+    }
+
+    if token_address == TOKEN_STRK_ADDRESS.try_into().unwrap() {
+        return 18;
+    }
+
+    if token_address == TOKEN_USDC_ADDRESS.try_into().unwrap() {
+        return 6;
+    }
+
+    if token_address == TOKEN_BTC_ADDRESS.try_into().unwrap() {
+        return 8;
+    }
+
+    if token_address == TOKEN_EKUBO_ADDRESS.try_into().unwrap() {
+        return 18;
+    }
+
+    assert(!token_address.is_zero(), Errors::INVALID_TOKEN_ADDRESS);
+
+    let decimals = IERC20Dispatcher { contract_address: token_address }.decimals();
+    assert(decimals != 0, Errors::WEIRD_DECIMALS);
+
+    decimals
+}
 
 fn pow(a: u128, b: u128) -> u128 {
     let mut x: u128 = a;

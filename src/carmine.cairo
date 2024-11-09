@@ -4,7 +4,7 @@ use traits::{TryInto, Into};
 use array::ArrayTrait;
 use debug::PrintTrait;
 
-use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
+use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TWO};
 use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed};
 use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
 
@@ -19,6 +19,13 @@ struct CarmOption {
     quote_token_address: ContractAddress,
     base_token_address: ContractAddress,
     option_type: u8
+}
+
+#[derive(Copy, Drop, Serde, starknet::Store)]
+struct CarmOptionWithSize {
+    option: CarmOption,
+    cost: Fixed,
+    size: u128
 }
 
 type LegacyStrike = felt252;
@@ -134,49 +141,72 @@ fn settle_option_position(address: ContractAddress, amount: u256) {
 }
 
 // Helper functions
+// fn buy_option(
+//     strike: Fixed,
+//     notional: u128,
+//     expiry: u64,
+//     calls: bool,
+//     base_token_addr: ContractAddress,
+//     quote_token_addr: ContractAddress,
+//     exp_price: Option<u128>,
+//     quote_token_decimals: u8
+// ) -> u128 {
+//     let option_type = if calls { 0 } else { 1 };
+//     let premia = match exp_price {
+//         // figure it out TODO
+//         Option::Some(value) => convert_from_int_to_Fixed(value * 12 / 10, quote_token_decimals),
+//         Option::None => convert_from_int_to_Fixed(notional / 5,  18),
+//     };
+//     // 'opt_type'.print();
+//     // option_type.print();
+//     // 'strike'.print();
+//     // strike.print();
+//     // 'maturity'.print();
+//     // expiry.print();
+//     // 'notional'.print();
+//     // notional.print();
+
+//     IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
+//     .trade_open(
+//         option_type,
+//         strike,
+//         expiry.into(),
+//         0,
+//         notional.into(),
+//         quote_token_addr,
+//         base_token_addr,
+//         premia,
+//         (get_block_timestamp() + 42).into()
+//     );
+
+//     notional
+// }
+
 fn buy_option(
+    option_with_size: CarmOptionWithSize,
+    option_amm: IAMMDispatcher
+) {
+    option_amm.trade_open(
+        option_with_size.option.option_type,
+        option_with_size.option.strike_price,
+        option_with_size.option.maturity,
+        option_with_size.option.option_side,
+        option_with_size.size,
+        option_with_size.option.quote_token_address,
+        option_with_size.option.base_token_address,
+        option_with_size.cost * TWO,
+        (get_block_timestamp() + 60).into()
+    );
+} 
+
+fn price_option(
     strike: Fixed,
     notional: u128,
     expiry: u64,
     calls: bool,
     base_token_addr: ContractAddress,
-    quote_token_addr: ContractAddress,
-    exp_price: Option<u128>,
-    quote_token_decimals: u8
-) -> u128 {
-    let option_type = if calls { 0 } else { 1 };
-    let premia = match exp_price {
-        // figure it out TODO
-        Option::Some(value) => convert_from_int_to_Fixed(value * 12 / 10, quote_token_decimals),
-        Option::None => convert_from_int_to_Fixed(notional / 5,  18),
-    };
-    // 'opt_type'.print();
-    // option_type.print();
-    // 'strike'.print();
-    // strike.print();
-    // 'maturity'.print();
-    // expiry.print();
-    // 'notional'.print();
-    // notional.print();
-
-    IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
-    .trade_open(
-        option_type,
-        strike,
-        expiry.into(),
-        0,
-        notional.into(),
-        quote_token_addr,
-        base_token_addr,
-        premia,
-        (get_block_timestamp() + 42).into()
-    );
-
-    notional
-}
-
-fn price_option(
-    strike: Fixed, notional: u128, expiry: u64, calls: bool, base_token_addr: ContractAddress, quote_token_addr: ContractAddress) -> u128 {
+    quote_token_addr: ContractAddress
+) -> CarmOptionWithSize {
     let option_type = if calls { 0 } else { 1 };
     // let lpt_addr_felt: ContractAddress = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
     //     .get_lptoken_address_for_given_option(quote_token_addr.try_into().unwrap(), base_token_addr.try_into().unwrap(), option_type);
@@ -190,14 +220,14 @@ fn price_option(
         option_type
     };
 
-    let (_, after_fees) = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
+    let (_, cost) = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() }
         .get_total_premia(option, notional.into(), false);
-    let res = if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
-        convert_from_Fixed_to_int(after_fees, 6).into()
-    } else {
-        convert_from_Fixed_to_int(after_fees, 18).into()
-    };
-    res
+    // let res = if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
+    //     convert_from_Fixed_to_int(after_fees, 6).into()
+    // } else {
+    //     convert_from_Fixed_to_int(after_fees, 18).into()
+    // };
+    CarmOptionWithSize { option: option, cost: cost, size: notional}
 }
 
 fn available_strikes(
