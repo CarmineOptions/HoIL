@@ -15,6 +15,8 @@ use hoil::hedging::{iterate_strike_prices, OptionAmount};
 use hoil::pragma::get_pragma_median_price;
 
 
+use debug::PrintTrait;
+
 fn compute_hedge_on_interval(
     tobuy: Fixed,
     tohedge: Fixed,
@@ -63,6 +65,8 @@ fn buy_and_approve(
         option_to_buy.option.base_token_address, 
         option_to_buy.option.option_type
     );
+    // '1'.print();
+    // option_to_buy.cost.mag.print();
     let option_token = amm.get_option_token_address(lpt_addr, 0, option_to_buy.option.maturity, option_to_buy.option.strike_price);
     let option_token_dispatcher = IERC20Dispatcher { contract_address: option_token };
 
@@ -117,9 +121,13 @@ fn build_hedge(
                     expiry,
                     true
                 );
-                already_hedged_calls = hedged;
-                cost_base += option_with_size.cost;
-                options_with_size.append(option_with_size);
+                // '7'.print();
+                // option_with_size.cost.mag.print();
+                if option_with_size.cost > FixedTrait::ZERO() {
+                    already_hedged_calls = hedged;
+                    cost_base += option_with_size.cost;
+                    options_with_size.append(option_with_size);
+                }
             },
             Option::None(()) => {
                 break;
@@ -143,9 +151,13 @@ fn build_hedge(
                     expiry,
                     false
                 );
-                already_hedged_puts = hedged;
-                cost_quote += option_with_size.cost;
-                options_with_size.append(option_with_size);
+                // '6'.print();
+                // option_with_size.cost.mag.print();
+                if option_with_size.cost > FixedTrait::ZERO() {
+                    already_hedged_puts = hedged;
+                    cost_quote += option_with_size.cost;
+                    options_with_size.append(option_with_size);
+                }
             },
             Option::None(()) => {
                 break;

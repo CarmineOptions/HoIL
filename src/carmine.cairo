@@ -4,9 +4,10 @@ use traits::{TryInto, Into};
 use array::ArrayTrait;
 use debug::PrintTrait;
 
-use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TWO};
+use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS};
 use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed};
 use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+use hoil::errors::Errors;
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
@@ -186,6 +187,8 @@ fn buy_option(
     option_with_size: CarmOptionWithSize,
     option_amm: IAMMDispatcher
 ) {
+    // let lim_tot_prem = option_with_size.cost * FixedTrait::from_unscaled_felt(2);
+    // lim_tot_prem.mag.print();
     option_amm.trade_open(
         option_with_size.option.option_type,
         option_with_size.option.strike_price,
@@ -194,7 +197,7 @@ fn buy_option(
         option_with_size.size,
         option_with_size.option.quote_token_address,
         option_with_size.option.base_token_address,
-        option_with_size.cost * TWO,
+        option_with_size.cost * FixedTrait::from_unscaled_felt(2),
         (get_block_timestamp() + 60).into()
     );
 } 
@@ -255,6 +258,6 @@ fn available_strikes(
         }
         i += 1;
     };
-    assert(res.len() > 0, 'Options for hedge unavail.');
+    assert(res.len() > 0, Errors::CALL_OPTIONS_UNAVAILABLE);
     res
 }

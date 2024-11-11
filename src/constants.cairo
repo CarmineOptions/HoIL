@@ -15,7 +15,4 @@ const HEDGE_TOKEN_ADDRESS: felt252 = 0x04b4b1ba9ca9057c4dd8762d427955fc8c6081192
 
 // TODO add 
 // const FEE_RECIEVER: felt252 = 0x0;
-
-const TWO: Fixed = Fixed { mag: 2, sign: false};
-
 const PROTOCOL_NAME: felt252 = 'Protection against IL';
