@@ -1,27 +1,40 @@
 use core::array::SpanTrait;
 use starknet::ContractAddress;
 use starknet::ClassHash;
-
+use cubit::f128::types::fixed::Fixed;
 
 
 #[starknet::interface]
 trait IILHedge<TContractState> {
-    fn hedge(
+    fn name(self: @TContractState) -> felt252;
+    fn hedge_open(
         ref self: TContractState,
         notional: u128,
         quote_token_addr: ContractAddress,
         base_token_addr: ContractAddress,
-        expiry: u64
+        expiry: u64,
+        limit_price: (Fixed, Fixed),
+        hedge_at_price: Fixed
+    );
+    fn hedge_close(
+        ref self: TContractState,
+        token_id: u256,
+    );
+    fn hedge_settle(
+        ref self: TContractState,
+        token_id: u256,
     );
     fn price_hedge(
         self: @TContractState,
         notional: u128,
         quote_token_addr: ContractAddress,
         base_token_addr: ContractAddress,
-        expiry: u64
-    ) -> (u128, u128);
+        expiry: u64,
+        hedge_at_price: Fixed
+    ) -> (Fixed, Fixed, Fixed);
     fn upgrade(ref self: TContractState, impl_hash: ClassHash);
     fn get_owner(self: @TContractState) -> ContractAddress;
+    // fn supports_interface(self: @TContractState, interface_id: felt252) -> bool;
 }
 
 #[starknet::contract]
@@ -30,171 +43,140 @@ mod ILHedge {
     use option::OptionTrait;
     use traits::{Into, TryInto};
 
-    use starknet::ContractAddress;
-    use starknet::ClassHash;
-    use starknet::{get_caller_address, get_contract_address};
+    use starknet::{get_caller_address, get_contract_address, ClassHash, ContractAddress};
     use starknet::syscalls::{replace_class_syscall};
 
     use cubit::f128::types::fixed::{Fixed, FixedTrait};
+    use openzeppelin::introspection::src5::SRC5Component;
+    use openzeppelin::introspection::src5::SRC5Component::InternalTrait;
+    use openzeppelin::introspection::interface::{ISRC5, ISRC5_ID};
+    use openzeppelin::account::interface::ISRC6_ID;
 
     use hoil::amm_curve::compute_portfolio_value;
-    use hoil::constants::{AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, HOIL};
+    use hoil::constants::{
+        AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, TOKEN_EKUBO_ADDRESS, HEDGE_TOKEN_ADDRESS,
+        PROTOCOL_NAME
+    };
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use hoil::carmine::{IAMMDispatcher, IAMMDispatcherTrait};
-    use hoil::hedging::{
-        iterate_strike_prices,
-        buy_options_at_strike_to_hedge_at,
-        price_options_at_strike_to_hedge_at
-    };
+    use hoil::hedging::hedge_finalize;
     use hoil::pragma::get_pragma_median_price;
-    use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed};
+    use hoil::helpers::{convert_from_int_to_Fixed, toU256_balance, get_decimal};
+    use hoil::hedge_token::{OptionAmount, IHedgeTokenDispatcher, IHedgeTokenDispatcherTrait};
+    use hoil::errors::Errors;
+    use hoil::utils::{build_hedge, buy_and_approve};
+    
+    component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     #[storage]
     struct Storage {
         owner: ContractAddress,
+        name: felt252,
+        #[substorage(v0)]
+        src5: SRC5Component::Storage,
     }
+
+    #[event]
+    #[derive(Drop, starknet::Event)]
+    enum Event {
+        HedgeOpened: HedgeOpenedEvent,
+        HedgeClosed: HedgeFinalizedEvent,
+        HedgeSettled: HedgeFinalizedEvent,
+        #[flat]
+        SRC5Event: SRC5Component::Event
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct HedgeOpenedEvent {
+        #[key]
+        user: ContractAddress,
+        hedge_token_id: u256,
+        amount: u256,
+        quote_token: ContractAddress,
+        base_token: ContractAddress,
+        maturity: u64,
+        at_price: Fixed
+    }
+
+    #[derive(Drop, starknet::Event)]
+    struct HedgeFinalizedEvent {
+        #[key]
+        user: ContractAddress,
+        hedge_token_id: u256,
+    }
+
+    #[abi(embed_v0)]
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
 
     #[constructor]
     fn constructor(ref self: ContractState, owner: ContractAddress) {
         self.owner.write(owner);
+        self.name.write(PROTOCOL_NAME);
+        SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC5_ID);
+        SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC6_ID);
     }
 
     #[abi(embed_v0)]
     impl ILHedge of super::IILHedge<ContractState> {
-        fn hedge(
+        fn name(self: @ContractState) -> felt252 {
+            self.name.read()
+        }
+
+        fn hedge_open(
             ref self: ContractState,
             notional: u128,
             quote_token_addr: ContractAddress,
             base_token_addr: ContractAddress,
-            expiry: u64
+            expiry: u64,
+            limit_price: (Fixed, Fixed),
+            hedge_at_price: Fixed
         ) {
-            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), 'NotImplementedYet');
-            let pricing: (u128, u128) = Self::price_hedge(
-                @self, notional, quote_token_addr, base_token_addr, expiry
+            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
+            let (cost_quote, cost_base, curr_price, options_to_buy) = build_hedge(
+                notional, quote_token_addr, base_token_addr, expiry, hedge_at_price
             );
-            let (cost_quote, cost_base) = pricing;
+
+            // check is price does not violate slippage limit
+            let (limit_quote, limit_base) = limit_price;
+            assert(cost_quote <= limit_quote, Errors::QUOTE_COST_OUT_OF_LIMITS);
+            assert(cost_base <= limit_base, Errors::BASE_COST_OUT_OF_LIMITS);
 
             let caller = get_caller_address();
+            let contract_address = starknet::get_contract_address();
 
             let amm = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() };
             
             // getting initial token balances
             let base_token = IERC20Dispatcher { contract_address: base_token_addr };
-            let initial_base_token_balance = base_token.balanceOf(HOIL.try_into().unwrap());
+            let initial_base_token_balance = base_token.balanceOf(contract_address);
             let quote_token = IERC20Dispatcher { contract_address: quote_token_addr };
-            let initial_quote_token_balance = quote_token.balanceOf(HOIL.try_into().unwrap());
+            let initial_quote_token_balance = quote_token.balanceOf(contract_address);
+
+            let limit_base_u256: u256 = toU256_balance(limit_base, get_decimal(base_token_addr).into());
+            let limit_quote_u256: u256 = toU256_balance(limit_quote, get_decimal(quote_token_addr).into());
 
             // receive funds from caller and approve spending on Carmine Options AMM.
-            base_token.transferFrom(caller, get_contract_address(), cost_base.into());
-            base_token.approve(AMM_ADDR.try_into().unwrap(), cost_base.into() * 105 / 100 );
-            quote_token.transferFrom(caller, get_contract_address(), cost_quote.into());
-            quote_token.approve(AMM_ADDR.try_into().unwrap(), cost_quote.into() * 105 / 100);
+            base_token.transferFrom(caller, get_contract_address(), limit_base_u256.into());
+            base_token.approve(AMM_ADDR.try_into().unwrap(), limit_base_u256.into());
+            quote_token.transferFrom(caller, get_contract_address(), limit_quote_u256.into());
+            quote_token.approve(AMM_ADDR.try_into().unwrap(), limit_quote_u256.into());
 
-            // collect price
-            let curr_price = get_pragma_median_price(quote_token_addr, base_token_addr);
+            // // Use hedge_at_price if provided, otherwise get the price from Pragma
+            // let curr_price = if (hedge_at_price <= FixedTrait::ZERO()) {
+            //     get_pragma_median_price(quote_token_addr, base_token_addr)
+            // } else {
+            //     hedge_at_price
+            // };
+            // assert(curr_price > FixedTrait::ZERO(), Errors::NEGATIVE_PRICE);
 
-            // get call options
-            let mut strikes_calls = iterate_strike_prices(
-                curr_price, quote_token_addr, base_token_addr, expiry, true
-            );
-            let mut already_hedged_calls: Fixed = FixedTrait::ZERO();
+            let mut purchased_tokens: Array<OptionAmount> = ArrayTrait::new();
+
+            let mut options_to_buy_span = options_to_buy.span();
             loop {
-                match strikes_calls.pop_front() {
-                    Option::Some(strike_pair) => {
-                        let (tobuy, tohedge) = *strike_pair;
-                        // compute how much portf value would be at each hedged strike
-                        // converts the excess to the hedge result asset (calls -> convert to eth)
-                        // for each strike
-                        // calculate portfolio value
-                        let portf_val_calls = compute_portfolio_value(
-                            curr_price, notional, true, tohedge
-                        );
-                        assert(portf_val_calls > FixedTrait::ZERO(), 'portf val calls < 0?');
-                        assert(portf_val_calls.sign == false, 'portf val neg??');
-                        // using portfolio value calculate amount to hedge,
-                        // excluding loss covered by options bought in prev. iterrations.
-                        let notional_fixed = convert_from_int_to_Fixed(notional, 18);
-                        let amount_to_hedge = (notional_fixed - portf_val_calls) - already_hedged_calls;
-                        already_hedged_calls += amount_to_hedge;
-                        let amount_to_hedge_quote = amount_to_hedge * curr_price;
-                        
-                        // get option token balance
-                        let lpt_addr: ContractAddress = amm.get_lptoken_address_for_given_option(quote_token_addr, base_token_addr, 0);
-                        let option_token = amm.get_option_token_address(lpt_addr, 0, expiry, tobuy);
-                        let option_token_dispatcher = IERC20Dispatcher { contract_address: option_token };
-                        let initial_option_balance = option_token_dispatcher.balanceOf(HOIL.try_into().unwrap());
-                        // buy call option
-                        buy_options_at_strike_to_hedge_at(
-                            tobuy,
-                            tohedge,
-                            amount_to_hedge_quote,
-                            expiry,
-                            quote_token_addr,
-                            base_token_addr,
-                            true
-                        );
-                        let new_option_balance = option_token_dispatcher.balanceOf(HOIL.try_into().unwrap());
-
-                        // Transfer options to the user
-                        option_token_dispatcher.transfer(caller, new_option_balance - initial_option_balance);
-                    },
-                    Option::None(()) => {
-                        break;
-                    }
-                };
-            };
-
-            // get put options
-            let mut already_hedged_puts: Fixed = FixedTrait::ZERO();
-
-            let mut strikes_puts = iterate_strike_prices(
-                curr_price, quote_token_addr, base_token_addr, expiry, false
-            );
-            loop {
-                match strikes_puts.pop_front() {
-                    Option::Some(strike_pair) => {
-                        let (tobuy, tohedge) = *strike_pair;
-                        // compute how much portf value would be at each hedged strike
-                        // converts the excess to the hedge result asset
-                        // for each strike
-                        // calculate portfolio value
-                        let portf_val_puts = compute_portfolio_value(
-                            curr_price, notional, false, tohedge
-                        );
-                        assert(portf_val_puts > FixedTrait::ZERO(), 'portf val puts < 0?');
-                        assert(
-                            portf_val_puts < (convert_from_int_to_Fixed(notional, 18) * curr_price),
-                            'some loss expected'
-                        ); // portf_val_puts is in quote token
-                        assert(portf_val_puts.sign == false, 'portf val neg??');
-                        // using portfolio value calculate amount to hedge,
-                        // excluding loss covered by options bought in prev. iterrations.
-                        let notional_fixed = convert_from_int_to_Fixed(notional, 18);
-                        let notional_in_quote = notional_fixed * curr_price;
-                        let amount_to_hedge = notional_in_quote - portf_val_puts - already_hedged_puts; // in quote token, with decimals
-                        already_hedged_puts += amount_to_hedge;
-
-                        // get option token balance
-                        let lpt_addr: ContractAddress = amm.get_lptoken_address_for_given_option(quote_token_addr, base_token_addr, 1);
-                        let option_token = amm.get_option_token_address(lpt_addr, 0, expiry, tobuy);
-                        let option_token_dispatcher = IERC20Dispatcher { contract_address: option_token };
-                        let initial_option_balance = option_token_dispatcher.balanceOf(HOIL.try_into().unwrap());
-
-                        // buy put option
-                        buy_options_at_strike_to_hedge_at(
-                            tobuy,
-                            tohedge,
-                            amount_to_hedge,
-                            expiry,
-                            quote_token_addr,
-                            base_token_addr,
-                            false
-                        );
-
-                        let new_option_balance = option_token_dispatcher.balanceOf(HOIL.try_into().unwrap());
-
-                        // Transfer options to the user
-                        option_token_dispatcher.transfer(caller, new_option_balance - initial_option_balance);
+                match options_to_buy_span.pop_front() {
+                    Option::Some(option_to_buy) => {
+                        let purchased_token = buy_and_approve(*option_to_buy, amm);
+                        purchased_tokens.append(purchased_token)
                     },
                     Option::None(()) => {
                         break;
@@ -203,22 +185,66 @@ mod ILHedge {
             };
             
             // return change 
-            let new_base_token_balance = base_token.balanceOf(HOIL.try_into().unwrap());
-            let new_quote_token_balance = quote_token.balanceOf(HOIL.try_into().unwrap()); 
+            let new_base_token_balance = base_token.balanceOf(contract_address);
+            let new_quote_token_balance = quote_token.balanceOf(contract_address); 
             
             let base_token_leftovers = new_base_token_balance - initial_base_token_balance;
-            assert(base_token_leftovers >= 0, 'base token overspent');
+            assert(base_token_leftovers >= 0, Errors::COST_EXCEEDS_LIMITS);
             base_token.transfer(caller, base_token_leftovers);
 
             let quote_token_leftovers = new_quote_token_balance - initial_quote_token_balance;
-            assert(quote_token_leftovers >= 0, 'quote token overspent');
+            assert(quote_token_leftovers >= 0, Errors::COST_EXCEEDS_LIMITS);
             quote_token.transfer(caller, quote_token_leftovers);
+
+            let hedge_token_dispatcher = IHedgeTokenDispatcher { contract_address: HEDGE_TOKEN_ADDRESS.try_into().unwrap()};
+            let hedge_token_id = hedge_token_dispatcher.mint_hedge_token(caller, purchased_tokens);
+
+            // Emit the HedgeOpened event
+            self.emit(Event::HedgeOpened(HedgeOpenedEvent {
+                user: caller,
+                hedge_token_id: hedge_token_id,
+                amount: notional.into(),
+                quote_token: quote_token_addr,
+                base_token: base_token_addr,
+                maturity: expiry,
+                at_price: curr_price
+            }));
+        }
+
+        fn hedge_close(
+            ref self: ContractState,
+            token_id: u256,
+        ) {
+            let caller: ContractAddress = hedge_finalize(token_id, true);
+
+            // Emit the HedgeClosed event
+            self.emit(Event::HedgeClosed(HedgeFinalizedEvent {
+                user: caller,
+                hedge_token_id: token_id,
+            }));
+        }
+
+        fn hedge_settle(
+            ref self: ContractState,
+            token_id: u256,
+        ) {
+            let caller: ContractAddress = hedge_finalize(token_id, false);
+
+             // Emit the HedgeSettled event
+             self.emit(Event::HedgeSettled(HedgeFinalizedEvent {
+                user: caller,
+                hedge_token_id: token_id,
+            }));
         }
 
         fn upgrade(ref self: ContractState, impl_hash: ClassHash) {
             let caller: ContractAddress = get_caller_address();
             let owner: ContractAddress = self.owner.read();
             assert(owner == caller, 'invalid caller');
+            self.name.write('Protection against IL');
+            SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC5_ID);
+            SRC5Component::InternalImpl::register_interface(ref self.src5, ISRC6_ID);
+
             assert(!impl_hash.is_zero(), 'Class hash cannot be zero');
             replace_class_syscall(impl_hash).unwrap();
         }
@@ -233,81 +259,13 @@ mod ILHedge {
             notional: u128,
             quote_token_addr: ContractAddress,
             base_token_addr: ContractAddress,
-            expiry: u64
-        ) -> (u128, u128) {
-            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), 'NotImplementedYet');
-            let curr_price = get_pragma_median_price(quote_token_addr, base_token_addr);
-
-            // iterate available strike prices and get them into pairs of (bought strike, at which strike one should be hedged)
-            let mut strikes_calls = iterate_strike_prices(
-                curr_price, quote_token_addr, base_token_addr, expiry, true
-            );
-            let mut strikes_puts = iterate_strike_prices(
-                curr_price, quote_token_addr, base_token_addr, expiry, false
-            );
-
-            let mut already_hedged_calls: Fixed = FixedTrait::ZERO();
-            let mut cost_quote = 0;
-            let mut cost_base = 0;
-
-            loop {
-                match strikes_calls.pop_front() {
-                    Option::Some(strike_pair) => {
-                        let (tobuy, tohedge) = *strike_pair;
-                        // compute how much portfolio value would be at each hedged strike
-                        // converts the excess to the hedge result asset (calls -> convert to eth)
-                        // for each strike
-                        let portf_val_calls = compute_portfolio_value(
-                            curr_price, notional, true, tohedge
-                        ); // value of second asset is precisely as much as user put in, expecting conversion
-                        assert(portf_val_calls > FixedTrait::ZERO(), 'portf val calls < 0?');
-                        assert(portf_val_calls.sign == false, 'portf val neg??');
-                        let notional_fixed = convert_from_int_to_Fixed(
-                            notional, 18
-                        ); // difference between converted and premia amounts is how much one should be hedging against
-                        //assert((notional_fixed - portf_val_calls) > already_hedged, "amounttohedge neg??"); // can't compile with it for some reason??
-                        let amount_to_hedge = (notional_fixed - portf_val_calls) - already_hedged_calls;
-                        already_hedged_calls += amount_to_hedge;
-                        let amount_to_hedge_quote = amount_to_hedge * curr_price;
-                        cost_base +=
-                            price_options_at_strike_to_hedge_at(
-                                tobuy, tohedge, amount_to_hedge_quote, expiry, true, base_token_addr, quote_token_addr
-                            );
-                    },
-                    Option::None(()) => {
-                        break;
-                    }
-                };
-            };
-
-            let mut already_hedged_puts: Fixed = FixedTrait::ZERO();
-            loop {
-                match strikes_puts.pop_front() {
-                    Option::Some(strike_pair) => {
-                        let (tobuy, tohedge) = *strike_pair;
-                        // compute how much portf value would be at each hedged strike
-                        // converts the excess to the hedge result asset
-                        // for each strike
-                        let portf_val_puts = compute_portfolio_value(
-                            curr_price, notional, false, tohedge
-                        ); // value of second asset is precisely as much as user put in, expecting conversion
-                        assert(portf_val_puts > FixedTrait::ZERO(), 'portf val puts < 0?');
-                        assert(portf_val_puts.sign == false, 'portf val neg??');
-                        let notional_fixed = convert_from_int_to_Fixed(notional, 18);
-                        let notional_in_quote = notional_fixed * curr_price;
-                        let amount_to_hedge = notional_in_quote - portf_val_puts - already_hedged_puts; // in quote token, with decimals
-                        already_hedged_puts += amount_to_hedge;
-                        cost_quote +=
-                            price_options_at_strike_to_hedge_at(
-                                tobuy, tohedge, amount_to_hedge, expiry, false, base_token_addr, quote_token_addr
-                            );
-                    },
-                    Option::None(()) => {
-                        break;
-                    }
-                };
-            };
-            (cost_quote, cost_base)
+            expiry: u64,
+            hedge_at_price: Fixed
+        ) -> (Fixed, Fixed, Fixed) {
+            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
+            assert(quote_token_addr != TOKEN_EKUBO_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
+            let (cost_quote, cost_base, price, _) = build_hedge(notional, quote_token_addr, base_token_addr, expiry, hedge_at_price);
+            (cost_quote, cost_base, price)
         }
     }
 }
