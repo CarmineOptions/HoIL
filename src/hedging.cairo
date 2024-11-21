@@ -25,12 +25,12 @@ fn iterate_strike_prices(
 ) -> Span<(Fixed, Fixed)> {
     let interval = if base_token_addr.into() == TOKEN_ETH_ADDRESS {
         if quote_token_addr.into() == TOKEN_USDC_ADDRESS {
-            FixedTrait::from_unscaled_felt(200)
+            FixedTrait::from_unscaled_felt(500)
         } else {
-            FixedTrait::from_unscaled_felt(300)
+            FixedTrait::from_unscaled_felt(700)
         }
     } else {
-        FixedTrait::from_unscaled_felt(5) / FixedTrait::from_unscaled_felt(100)
+        FixedTrait::from_unscaled_felt(1) / FixedTrait::from_unscaled_felt(10)
     };
     
     let mut strike_prices_arr = available_strikes(expiry, quote_token_addr, base_token_addr, calls);
