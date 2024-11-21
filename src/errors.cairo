@@ -8,4 +8,6 @@ mod Errors {
     const BASE_COST_OUT_OF_LIMITS: felt252 = 'Base cost exceeds limit';
     const NEGATIVE_PRICE: felt252 = 'Price cant be negative';
     const COST_EXCEEDS_LIMITS: felt252 = 'Cost out of slippage bounds';
+    const LOWER_TICK_TOO_HIGH: felt252 = 'Lower tick too high';
+    const UPPER_TICK_TOO_LOW: felt252 = 'Upper tick too low';
 }
