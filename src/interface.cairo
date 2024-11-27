@@ -75,8 +75,9 @@ mod ILHedge {
 
     use hoil::amm_curve::compute_portfolio_value;
     use hoil::constants::{
-        AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, TOKEN_EKUBO_ADDRESS, HEDGE_TOKEN_ADDRESS,
-        PROTOCOL_NAME
+        AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS,
+        TOKEN_BTC_ADDRESS, TOKEN_EKUBO_ADDRESS, HEDGE_TOKEN_ADDRESS,
+        PROTOCOL_NAME, PROTOCOL_FEE, FEE_RECEIVER
     };
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use hoil::carmine::{IAMMDispatcher, IAMMDispatcherTrait};
@@ -153,9 +154,15 @@ mod ILHedge {
             hedge_at_price: Fixed
         ) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
-            let (cost_quote, cost_base, curr_price, options_to_buy) = build_hedge(
+            let (mut cost_quote, mut cost_base, curr_price, options_to_buy) = build_hedge(
                 notional, quote_token_addr, base_token_addr, expiry, hedge_at_price
             );
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
 
             // check is price does not violate slippage limit
             let (limit_quote, limit_base) = limit_price;
@@ -164,6 +171,7 @@ mod ILHedge {
 
             let caller = get_caller_address();
             let contract_address = starknet::get_contract_address();
+            let fee_receiver: ContractAddress = FEE_RECEIVER.try_into().unwrap();
 
             let amm = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() };
             
@@ -177,10 +185,16 @@ mod ILHedge {
             let limit_quote_u256: u256 = toU256_balance(limit_quote, get_decimal(quote_token_addr).into());
 
             // receive funds from caller and approve spending on Carmine Options AMM.
-            base_token.transferFrom(caller, get_contract_address(), limit_base_u256.into());
+            base_token.transferFrom(caller, contract_address, limit_base_u256.into());
             base_token.approve(AMM_ADDR.try_into().unwrap(), limit_base_u256.into());
-            quote_token.transferFrom(caller, get_contract_address(), limit_quote_u256.into());
+            quote_token.transferFrom(caller, contract_address, limit_quote_u256.into());
             quote_token.approve(AMM_ADDR.try_into().unwrap(), limit_quote_u256.into());
+
+            // Transfer protocol fees to fee receiver
+            let quote_fee_u256: u256 = toU256_balance(quote_fee, get_decimal(quote_token_addr).into());
+            let base_fee_u256: u256 = toU256_balance(base_fee, get_decimal(base_token_addr).into());
+            quote_token.transfer(fee_receiver, quote_fee_u256);
+            base_token.transfer(fee_receiver, base_fee_u256);
 
             let mut purchased_tokens: Array<OptionAmount> = ArrayTrait::new();
 
@@ -236,9 +250,16 @@ mod ILHedge {
             hedge_at_price: Fixed
         ) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
-            let (cost_quote, cost_base, curr_price, _, _, options_to_buy) = build_concentrated_hedge(
+            let (mut cost_quote, mut cost_base, curr_price, _, _, options_to_buy) = build_concentrated_hedge(
                 notional, quote_token_addr, base_token_addr, expiry, tick_lower_bound, tick_upper_bound, hedge_at_price
             );
+
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
 
             // check is price does not violate slippage limit
             let (limit_quote, limit_base) = limit_price;
@@ -247,6 +268,7 @@ mod ILHedge {
 
             let caller = get_caller_address();
             let contract_address = starknet::get_contract_address();
+            let fee_receiver: ContractAddress = FEE_RECEIVER.try_into().unwrap();
 
             let amm = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() };
             
@@ -260,10 +282,16 @@ mod ILHedge {
             let limit_quote_u256: u256 = toU256_balance(limit_quote, get_decimal(quote_token_addr).into());
 
             // receive funds from caller and approve spending on Carmine Options AMM.
-            base_token.transferFrom(caller, get_contract_address(), limit_base_u256.into());
+            base_token.transferFrom(caller, contract_address, limit_base_u256.into());
             base_token.approve(AMM_ADDR.try_into().unwrap(), limit_base_u256.into());
-            quote_token.transferFrom(caller, get_contract_address(), limit_quote_u256.into());
+            quote_token.transferFrom(caller, contract_address, limit_quote_u256.into());
             quote_token.approve(AMM_ADDR.try_into().unwrap(), limit_quote_u256.into());
+
+            // Transfer protocol fees to fee receiver
+            let quote_fee_u256: u256 = toU256_balance(quote_fee, get_decimal(quote_token_addr).into());
+            let base_fee_u256: u256 = toU256_balance(base_fee, get_decimal(base_token_addr).into());
+            quote_token.transfer(fee_receiver, quote_fee_u256);
+            base_token.transfer(fee_receiver, base_fee_u256);
 
             let mut purchased_tokens: Array<OptionAmount> = ArrayTrait::new();
 
@@ -360,7 +388,15 @@ mod ILHedge {
         ) -> (Fixed, Fixed, Fixed) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
             assert(quote_token_addr != TOKEN_EKUBO_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
-            let (cost_quote, cost_base, price, _) = build_hedge(notional, quote_token_addr, base_token_addr, expiry, hedge_at_price);
+            let (mut cost_quote, mut cost_base, price, _) = build_hedge(notional, quote_token_addr, base_token_addr, expiry, hedge_at_price);
+
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
+            
             (cost_quote, cost_base, price)
         }
 
@@ -377,7 +413,15 @@ mod ILHedge {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
             assert(quote_token_addr != TOKEN_EKUBO_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
 
-            let (cost_quote, cost_base, price, tick_lower_bound, tick_upper_bound, _) = build_concentrated_hedge(notional, quote_token_addr, base_token_addr, expiry, tick_lower_bound, tick_upper_bound, hedge_at_price);
+            let (mut cost_quote, mut cost_base, price, tick_lower_bound, tick_upper_bound, _) = build_concentrated_hedge(notional, quote_token_addr, base_token_addr, expiry, tick_lower_bound, tick_upper_bound, hedge_at_price);
+            
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
+
             (cost_quote, cost_base, price, tick_lower_bound, tick_upper_bound)
         }
     }

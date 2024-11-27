@@ -13,6 +13,8 @@ const HOIL: felt252 = 0x038290ac85a923dd7b38c23cc1ec5b15853b76e2c3c02d367043685c
 
 const HEDGE_TOKEN_ADDRESS: felt252 = 0x04b4b1ba9ca9057c4dd8762d427955fc8c6081192f1f99aafe440ff5cd33aa1f;
 
-// TODO add 
-// const FEE_RECIEVER: felt252 = 0x0;
+
+const FEE_RECEIVER: felt252 = 0x0;
+const PROTOCOL_FEE: u32 = 0;
+
 const PROTOCOL_NAME: felt252 = 'Protection against IL';
