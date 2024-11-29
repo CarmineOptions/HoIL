@@ -16,6 +16,17 @@ trait IILHedge<TContractState> {
         limit_price: (Fixed, Fixed),
         hedge_at_price: Fixed
     );
+    fn clmm_hedge_open(
+        ref self: TContractState,
+        notional: u128,
+        quote_token_addr: ContractAddress,
+        base_token_addr: ContractAddress,
+        expiry: u64,
+        limit_price: (Fixed, Fixed),
+        tick_lower_bound: Fixed,
+        tick_upper_bound: Fixed,
+        hedge_at_price: Fixed
+    );
     fn hedge_close(
         ref self: TContractState,
         token_id: u256,
@@ -32,6 +43,16 @@ trait IILHedge<TContractState> {
         expiry: u64,
         hedge_at_price: Fixed
     ) -> (Fixed, Fixed, Fixed);
+    fn price_concentrated_hedge(
+        self: @TContractState,
+        notional: u128,
+        quote_token_addr: ContractAddress,
+        base_token_addr: ContractAddress,
+        expiry: u64,
+        tick_lower_bound: Fixed,
+        tick_upper_bound: Fixed,
+        hedge_at_price: Fixed
+    ) -> (Fixed, Fixed, Fixed, Fixed, Fixed);
     fn upgrade(ref self: TContractState, impl_hash: ClassHash);
     fn get_owner(self: @TContractState) -> ContractAddress;
     // fn supports_interface(self: @TContractState, interface_id: felt252) -> bool;
@@ -54,8 +75,9 @@ mod ILHedge {
 
     use hoil::amm_curve::compute_portfolio_value;
     use hoil::constants::{
-        AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, TOKEN_EKUBO_ADDRESS, HEDGE_TOKEN_ADDRESS,
-        PROTOCOL_NAME
+        AMM_ADDR, TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS,
+        TOKEN_BTC_ADDRESS, TOKEN_EKUBO_ADDRESS, HEDGE_TOKEN_ADDRESS,
+        PROTOCOL_NAME, PROTOCOL_FEE, FEE_RECEIVER
     };
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use hoil::carmine::{IAMMDispatcher, IAMMDispatcherTrait};
@@ -64,7 +86,7 @@ mod ILHedge {
     use hoil::helpers::{convert_from_int_to_Fixed, toU256_balance, get_decimal};
     use hoil::hedge_token::{OptionAmount, IHedgeTokenDispatcher, IHedgeTokenDispatcherTrait};
     use hoil::errors::Errors;
-    use hoil::utils::{build_hedge, buy_and_approve};
+    use hoil::utils::{build_hedge, build_concentrated_hedge, buy_and_approve};
     
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
@@ -132,9 +154,15 @@ mod ILHedge {
             hedge_at_price: Fixed
         ) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
-            let (cost_quote, cost_base, curr_price, options_to_buy) = build_hedge(
+            let (mut cost_quote, mut cost_base, curr_price, options_to_buy) = build_hedge(
                 notional, quote_token_addr, base_token_addr, expiry, hedge_at_price
             );
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
 
             // check is price does not violate slippage limit
             let (limit_quote, limit_base) = limit_price;
@@ -143,6 +171,7 @@ mod ILHedge {
 
             let caller = get_caller_address();
             let contract_address = starknet::get_contract_address();
+            let fee_receiver: ContractAddress = FEE_RECEIVER.try_into().unwrap();
 
             let amm = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() };
             
@@ -156,18 +185,113 @@ mod ILHedge {
             let limit_quote_u256: u256 = toU256_balance(limit_quote, get_decimal(quote_token_addr).into());
 
             // receive funds from caller and approve spending on Carmine Options AMM.
-            base_token.transferFrom(caller, get_contract_address(), limit_base_u256.into());
+            base_token.transferFrom(caller, contract_address, limit_base_u256.into());
             base_token.approve(AMM_ADDR.try_into().unwrap(), limit_base_u256.into());
-            quote_token.transferFrom(caller, get_contract_address(), limit_quote_u256.into());
+            quote_token.transferFrom(caller, contract_address, limit_quote_u256.into());
             quote_token.approve(AMM_ADDR.try_into().unwrap(), limit_quote_u256.into());
 
-            // // Use hedge_at_price if provided, otherwise get the price from Pragma
-            // let curr_price = if (hedge_at_price <= FixedTrait::ZERO()) {
-            //     get_pragma_median_price(quote_token_addr, base_token_addr)
-            // } else {
-            //     hedge_at_price
-            // };
-            // assert(curr_price > FixedTrait::ZERO(), Errors::NEGATIVE_PRICE);
+            // Transfer protocol fees to fee receiver
+            let quote_fee_u256: u256 = toU256_balance(quote_fee, get_decimal(quote_token_addr).into());
+            let base_fee_u256: u256 = toU256_balance(base_fee, get_decimal(base_token_addr).into());
+            quote_token.transfer(fee_receiver, quote_fee_u256);
+            base_token.transfer(fee_receiver, base_fee_u256);
+
+            let mut purchased_tokens: Array<OptionAmount> = ArrayTrait::new();
+
+            let mut options_to_buy_span = options_to_buy.span();
+            loop {
+                match options_to_buy_span.pop_front() {
+                    Option::Some(option_to_buy) => {
+                        let purchased_token = buy_and_approve(*option_to_buy, amm);
+                        purchased_tokens.append(purchased_token)
+                    },
+                    Option::None(()) => {
+                        break;
+                    }
+                };
+            };
+            
+            // return change 
+            let new_base_token_balance = base_token.balanceOf(contract_address);
+            let new_quote_token_balance = quote_token.balanceOf(contract_address); 
+            
+            let base_token_leftovers = new_base_token_balance - initial_base_token_balance;
+            assert(base_token_leftovers >= 0, Errors::COST_EXCEEDS_LIMITS);
+            base_token.transfer(caller, base_token_leftovers);
+
+            let quote_token_leftovers = new_quote_token_balance - initial_quote_token_balance;
+            assert(quote_token_leftovers >= 0, Errors::COST_EXCEEDS_LIMITS);
+            quote_token.transfer(caller, quote_token_leftovers);
+
+            let hedge_token_dispatcher = IHedgeTokenDispatcher { contract_address: HEDGE_TOKEN_ADDRESS.try_into().unwrap()};
+            let hedge_token_id = hedge_token_dispatcher.mint_hedge_token(caller, purchased_tokens);
+
+            // Emit the HedgeOpened event
+            self.emit(Event::HedgeOpened(HedgeOpenedEvent {
+                user: caller,
+                hedge_token_id: hedge_token_id,
+                amount: notional.into(),
+                quote_token: quote_token_addr,
+                base_token: base_token_addr,
+                maturity: expiry,
+                at_price: curr_price
+            }));
+        }
+
+        fn clmm_hedge_open(
+            ref self: ContractState,
+            notional: u128,
+            quote_token_addr: ContractAddress,
+            base_token_addr: ContractAddress,
+            expiry: u64,
+            limit_price: (Fixed, Fixed),
+            tick_lower_bound: Fixed,
+            tick_upper_bound: Fixed,
+            hedge_at_price: Fixed
+        ) {
+            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
+            let (mut cost_quote, mut cost_base, curr_price, _, _, options_to_buy) = build_concentrated_hedge(
+                notional, quote_token_addr, base_token_addr, expiry, tick_lower_bound, tick_upper_bound, hedge_at_price
+            );
+
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
+
+            // check is price does not violate slippage limit
+            let (limit_quote, limit_base) = limit_price;
+            assert(cost_quote <= limit_quote, Errors::QUOTE_COST_OUT_OF_LIMITS);
+            assert(cost_base <= limit_base, Errors::BASE_COST_OUT_OF_LIMITS);
+
+            let caller = get_caller_address();
+            let contract_address = starknet::get_contract_address();
+            let fee_receiver: ContractAddress = FEE_RECEIVER.try_into().unwrap();
+
+            let amm = IAMMDispatcher { contract_address: AMM_ADDR.try_into().unwrap() };
+            
+            // getting initial token balances
+            let base_token = IERC20Dispatcher { contract_address: base_token_addr };
+            let initial_base_token_balance = base_token.balanceOf(contract_address);
+            let quote_token = IERC20Dispatcher { contract_address: quote_token_addr };
+            let initial_quote_token_balance = quote_token.balanceOf(contract_address);
+
+            let limit_base_u256: u256 = toU256_balance(limit_base, get_decimal(base_token_addr).into());
+            let limit_quote_u256: u256 = toU256_balance(limit_quote, get_decimal(quote_token_addr).into());
+
+            // receive funds from caller and approve spending on Carmine Options AMM.
+            base_token.transferFrom(caller, contract_address, limit_base_u256.into());
+            base_token.approve(AMM_ADDR.try_into().unwrap(), limit_base_u256.into());
+            quote_token.transferFrom(caller, contract_address, limit_quote_u256.into());
+            quote_token.approve(AMM_ADDR.try_into().unwrap(), limit_quote_u256.into());
+
+            // Transfer protocol fees to fee receiver
+            let quote_fee_u256: u256 = toU256_balance(quote_fee, get_decimal(quote_token_addr).into());
+            let base_fee_u256: u256 = toU256_balance(base_fee, get_decimal(base_token_addr).into());
+            quote_token.transfer(fee_receiver, quote_fee_u256);
+            base_token.transfer(fee_receiver, base_fee_u256);
 
             let mut purchased_tokens: Array<OptionAmount> = ArrayTrait::new();
 
@@ -264,8 +388,41 @@ mod ILHedge {
         ) -> (Fixed, Fixed, Fixed) {
             assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
             assert(quote_token_addr != TOKEN_EKUBO_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
-            let (cost_quote, cost_base, price, _) = build_hedge(notional, quote_token_addr, base_token_addr, expiry, hedge_at_price);
+            let (mut cost_quote, mut cost_base, price, _) = build_hedge(notional, quote_token_addr, base_token_addr, expiry, hedge_at_price);
+
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
+            
             (cost_quote, cost_base, price)
+        }
+
+        fn price_concentrated_hedge(
+            self: @ContractState,
+            notional: u128,
+            quote_token_addr: ContractAddress,
+            base_token_addr: ContractAddress,
+            expiry: u64,
+            tick_lower_bound: Fixed,
+            tick_upper_bound: Fixed,
+            hedge_at_price: Fixed
+        ) -> (Fixed, Fixed, Fixed, Fixed, Fixed) {
+            assert(quote_token_addr != TOKEN_BTC_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
+            assert(quote_token_addr != TOKEN_EKUBO_ADDRESS.try_into().unwrap(), Errors::NOT_IMPLEMETED);
+
+            let (mut cost_quote, mut cost_base, price, tick_lower_bound, tick_upper_bound, _) = build_concentrated_hedge(notional, quote_token_addr, base_token_addr, expiry, tick_lower_bound, tick_upper_bound, hedge_at_price);
+            
+            // add protocol fees
+            let fee_multiplier = FixedTrait::from_unscaled_felt(PROTOCOL_FEE.into()) / FixedTrait::from_unscaled_felt(10000);
+            let quote_fee = cost_quote * fee_multiplier;
+            let base_fee = cost_base * fee_multiplier;
+            cost_quote = cost_quote + quote_fee;
+            cost_base = cost_base + base_fee;
+
+            (cost_quote, cost_base, price, tick_lower_bound, tick_upper_bound)
         }
     }
 }

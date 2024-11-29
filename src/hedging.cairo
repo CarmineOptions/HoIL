@@ -21,16 +21,16 @@ fn iterate_strike_prices(
     quote_token_addr: ContractAddress,
     base_token_addr: ContractAddress,
     expiry: u64,
-    calls: bool
+    calls: bool,
 ) -> Span<(Fixed, Fixed)> {
     let interval = if base_token_addr.into() == TOKEN_ETH_ADDRESS {
         if quote_token_addr.into() == TOKEN_USDC_ADDRESS {
-            FixedTrait::from_unscaled_felt(200)
+            FixedTrait::from_unscaled_felt(500)
         } else {
-            FixedTrait::from_unscaled_felt(300)
+            FixedTrait::from_unscaled_felt(700)
         }
     } else {
-        FixedTrait::from_unscaled_felt(5) / FixedTrait::from_unscaled_felt(100)
+        FixedTrait::from_unscaled_felt(1) / FixedTrait::from_unscaled_felt(10)
     };
     
     let mut strike_prices_arr = available_strikes(expiry, quote_token_addr, base_token_addr, calls);
@@ -57,6 +57,55 @@ fn iterate_strike_prices(
         // This is handled by the other type of the options.
         let tobuy = *strike_prices.at(i);
         let tohedge = *strike_prices.at(i + 1);
+        if (calls && (tobuy > curr_price || tohedge > curr_price)) {
+            let pair: (Fixed, Fixed) = (tobuy, tohedge);
+            res.append(pair);
+        } else if (!calls && (tobuy < curr_price || tohedge < curr_price)) {
+            let pair: (Fixed, Fixed) = (tobuy, tohedge);
+            res.append(pair);
+        }
+
+        i += 1;
+    };
+    res.span()
+}
+
+fn iterate_strike_prices_with_bound(
+    curr_price: Fixed,
+    quote_token_addr: ContractAddress,
+    base_token_addr: ContractAddress,
+    expiry: u64,
+    calls: bool,
+    bound: Fixed
+) -> Span<(Fixed, Fixed)> {
+    let mut strike_prices_arr = available_strikes(expiry, quote_token_addr, base_token_addr, calls);
+    let mut res = ArrayTrait::<(Fixed, Fixed)>::new();
+    let mut strike_prices = merge(strike_prices_arr).span();
+    if (!calls) {
+        strike_prices = reverse(strike_prices);
+    }
+    let mut i = 0;
+    loop {
+        // If last available strike - we pair with constant
+        if (i + 1 == strike_prices.len()) {
+            res
+                .append(
+                    (*strike_prices.at(i), bound)
+                );
+            break;
+        }
+        // If both strikes are above (in case of puts) or below (in case of calls) current price, no point – so throw away.
+        // This is handled by the other type of the options.
+        let tobuy = *strike_prices.at(i);
+        let tohedge = *strike_prices.at(i + 1);
+        if (calls & (tohedge > bound)) | (!calls & (tohedge < bound)) {
+            res
+                .append(
+                    (*strike_prices.at(i), bound)
+                );
+            break;
+        }
+
         if (calls && (tobuy > curr_price || tohedge > curr_price)) {
             let pair: (Fixed, Fixed) = (tobuy, tohedge);
             res.append(pair);

@@ -187,7 +187,7 @@ mod HedgeToken {
             let amount = 1;
             let caller = get_caller_address();
             // TODO assert caller is allowed to mint/burn
-            // assert(caller == HOIL.try_into().unwrap(), 'Unautorized to mint');
+            assert(caller == HOIL.try_into().unwrap(), 'Unautorized to mint');
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
 
@@ -222,7 +222,7 @@ mod HedgeToken {
 
         fn burn_hedge_token(ref self: ContractState, token_id: u256) -> Array<OptionAmount> {
             let caller = get_caller_address();
-            // assert(caller == HOIL.try_into().unwrap(), 'Unautorized to burn');
+            assert(caller == HOIL.try_into().unwrap(), 'Unautorized to burn');
             let mut returned_tokens: Array<OptionAmount> = ArrayTrait::new();
         
             // Check if the caller has enough tokens to burn
