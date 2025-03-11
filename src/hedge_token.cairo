@@ -9,10 +9,11 @@ struct OptionAmount {
 
 #[derive(Drop, Serde, Copy)]
 struct HedgeInfo {
-    amount: u256,
+    balance: u256,
     maturity: u64,
     base: ContractAddress,
     quote: ContractAddress,
+    id: u256,
 }
 
 #[starknet::interface]
@@ -339,7 +340,8 @@ mod HedgeToken {
                                 base: self.base_token_address(current_id),
                                 quote: self.quote_token_address(current_id),
                                 maturity: self.maturity(current_id),
-                                amount: balance
+                                balance,
+                                id: current_id,
                             }
                         );
                 }
