@@ -90,9 +90,7 @@ fn _get_pragma_median_price(key: felt252) -> Fixed {
 // @param quote_token_addr: Address of quote token in given ticker
 // @param base_token_addr: Address of base token in given ticker
 // @return stablecoin_key: Spot pair key identifier
-fn _get_ticker_key(
-    quote_token_addr: ContractAddress, base_token_addr: ContractAddress
-) -> felt252 {
+fn _get_ticker_key(quote_token_addr: ContractAddress, base_token_addr: ContractAddress) -> felt252 {
     if base_token_addr.into() == TOKEN_ETH_ADDRESS {
         if quote_token_addr.into() == TOKEN_USDC_ADDRESS {
             PRAGMA_ETH_USD_KEY
@@ -112,7 +110,7 @@ fn _get_ticker_key(
 
 
 // @notice Returns Pragma key identifier for stablecoins
-// @param quote_token_addr: Address of given stablecoin 
+// @param quote_token_addr: Address of given stablecoin
 // @return stablecoin_key: Stablecoin key identifier
 fn _get_stablecoin_key(quote_token_addr: ContractAddress) -> Option<felt252> {
     if quote_token_addr == TOKEN_USDC_ADDRESS.try_into().expect('Pragma/GSK - Failed to convert') {
@@ -157,8 +155,6 @@ fn account_for_stablecoin_divergence(price: Fixed, quote_token_addr: ContractAdd
             return price / stable_coin_price;
         },
         // If key is zero, it means that quote_token isn't stablecoin(or at least one we use)
-        Option::None(_) => {
-            return price;
-        }
+        Option::None(_) => { return price; }
     }
 }
