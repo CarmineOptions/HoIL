@@ -152,7 +152,7 @@ mod HedgeToken {
             assert(owner == caller, 'invalid caller');
             assert(!impl_hash.is_zero(), 'Class hash cannot be zero');
             replace_class_syscall(impl_hash).unwrap();
-            self.erc1155.initializer("api.carmine.finance/api/v1/mainnet/hedge?token_id=1");
+            self.erc1155.initializer("api.carmine.finance/api/v1/mainnet/hedge?token_id=");
         }
 
         fn set_pail_contract_address(ref self: ContractState, new_address: ContractAddress) {

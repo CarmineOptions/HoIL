@@ -8,9 +8,19 @@ use starknet::ContractAddress;
 
 use cubit::f128::types::fixed::{Fixed, FixedTrait};
 
-use hoil::constants::{TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS, TOKEN_EKUBO_ADDRESS};
+use hoil::constants::{
+    TOKEN_ETH_ADDRESS, TOKEN_USDC_ADDRESS, TOKEN_STRK_ADDRESS, TOKEN_BTC_ADDRESS,
+    TOKEN_EKUBO_ADDRESS
+};
 use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
 use hoil::errors::Errors;
+
+/// @notice Helper for getting ERC20 dispatcher
+/// @param address The address of the token contract.
+/// @return A dispatcher instance
+fn get_erc20_dispatcher(address: ContractAddress) -> IERC20Dispatcher {
+    IERC20Dispatcher { contract_address: address }
+}
 
 // @notice Get decimal count for the given token
 // @dev 18 for ETH, STRK, EKUBO, 6 for USDC, 8 for WBTC
@@ -38,8 +48,8 @@ fn get_decimal(token_address: ContractAddress) -> u8 {
     }
 
     assert(!token_address.is_zero(), Errors::INVALID_TOKEN_ADDRESS);
-
-    let decimals = IERC20Dispatcher { contract_address: token_address }.decimals();
+    let disp = get_erc20_dispatcher(token_address);
+    let decimals = disp.decimals();
     assert(decimals != 0, Errors::WEIRD_DECIMALS);
 
     decimals
@@ -74,7 +84,8 @@ fn pow(a: u128, b: u128) -> u128 {
 }
 
 fn convert_from_int_to_Fixed(value: u128, decimals: u8) -> Fixed {
-    // Overflows (fails) when converting approx 1 million ETH, would need to use u256 for that, different code path needed.
+    // Overflows (fails) when converting approx 1 million ETH, would need to use u256 for that,
+    // different code path needed.
 
     let denom: u128 = pow(5, decimals.into());
     let numer: u128 = pow(2, 64 - decimals.into());
@@ -151,9 +162,9 @@ fn lcm(x: u128, y: u128) -> u128 {
 
 fn closest_value(a: u128, b: u128, c: u128) -> u128 {
     let lcm_bc = lcm(b, c);
-    
+
     // Find the closest multiple of LCM(b, c) to a
     let closest_x = lcm_bc * ((a + lcm_bc - 1) / lcm_bc);
-    
+
     closest_x
 }
