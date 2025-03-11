@@ -11,7 +11,7 @@ use hoil::constants::HEDGE_TOKEN_ADDRESS;
 use hoil::carmine::{CarmOptionWithSize, buy_option, IAMMDispatcher, IAMMDispatcherTrait};
 use hoil::helpers::{convert_from_Fixed_to_int, convert_from_int_to_Fixed, get_decimal};
 use hoil::errors::Errors;
-use hoil::hedging::{iterate_strike_prices, OptionAmount};
+use hoil::hedging::{iterate_strike_prices, iterate_strike_prices_with_bound, OptionAmount};
 use hoil::pragma::get_pragma_median_price;
 
 
@@ -167,3 +167,99 @@ fn build_hedge(
     (cost_quote, cost_base, curr_price, options_with_size)
 }
 
+fn build_concentrated_hedge(
+    notional: u128,
+    quote_token_addr: ContractAddress,
+    base_token_addr: ContractAddress,
+    expiry: u64,
+    tick_lower_bound: Fixed,
+    tick_upper_bound: Fixed,
+    hedge_at_price: Fixed
+) -> (Fixed, Fixed, Fixed, Fixed, Fixed, Array<CarmOptionWithSize>) {
+    // Use hedge_at_price if provided, otherwise get the price from Pragma
+    let curr_price = if (hedge_at_price <= FixedTrait::ZERO()) {
+        get_pragma_median_price(quote_token_addr, base_token_addr)
+    } else {
+        hedge_at_price
+    };
+    assert(curr_price > FixedTrait::ZERO(), Errors::NEGATIVE_PRICE);
+    assert(tick_lower_bound < curr_price, Errors::LOWER_TICK_TOO_HIGH);
+    assert(tick_upper_bound > curr_price, Errors::UPPER_TICK_TOO_LOW);
+
+    // iterate available strike prices and get them into pairs of (bought strike, at which strike one should be hedged)
+    let mut strikes_calls = iterate_strike_prices_with_bound(
+        curr_price, quote_token_addr, base_token_addr, expiry, true, tick_upper_bound
+    );
+    assert(strikes_calls.len() > 0, Errors::CALL_OPTIONS_UNAVAILABLE);
+    let mut strikes_puts = iterate_strike_prices_with_bound(
+        curr_price, quote_token_addr, base_token_addr, expiry, false, tick_lower_bound
+    );
+    assert(strikes_puts.len() > 0, Errors::PUT_OPTIONS_UNAVAILABLE);
+
+    let mut already_hedged_calls: Fixed = FixedTrait::ZERO();
+    let mut cost_quote = FixedTrait::ZERO();
+    let mut cost_base = FixedTrait::ZERO();
+
+    let mut options_with_size: Array<CarmOptionWithSize> = ArrayTrait::new();
+
+    loop {
+        match strikes_calls.pop_front() {
+            Option::Some(strike_pair) => {
+                let (tobuy, tohedge) = *strike_pair;
+                let (hedged, option_with_size) = compute_hedge_on_interval(
+                    tobuy,
+                    tohedge,
+                    base_token_addr,
+                    quote_token_addr,
+                    notional,
+                    curr_price,
+                    already_hedged_calls,
+                    expiry,
+                    true
+                );
+                // '7'.print();
+                // option_with_size.cost.mag.print();
+                if option_with_size.cost > FixedTrait::ZERO() {
+                    already_hedged_calls = hedged;
+                    cost_base += option_with_size.cost;
+                    options_with_size.append(option_with_size);
+                }
+            },
+            Option::None(()) => {
+                break;
+            }
+        };
+    };
+
+    let mut already_hedged_puts: Fixed = FixedTrait::ZERO();
+    loop {
+        match strikes_puts.pop_front() {
+            Option::Some(strike_pair) => {
+                let (tobuy, tohedge) = *strike_pair;
+                let (hedged, option_with_size) = compute_hedge_on_interval(
+                    tobuy,
+                    tohedge,
+                    base_token_addr,
+                    quote_token_addr,
+                    notional,
+                    curr_price,
+                    already_hedged_puts,
+                    expiry,
+                    false
+                );
+                // '6'.print();
+                // option_with_size.cost.mag.print();
+                if option_with_size.cost > FixedTrait::ZERO() {
+                    already_hedged_puts = hedged;
+                    cost_quote += option_with_size.cost;
+                    options_with_size.append(option_with_size);
+                }
+            },
+            Option::None(()) => {
+                break;
+            }
+        };
+    };
+
+    (cost_quote, cost_base, curr_price, tick_lower_bound, tick_upper_bound, options_with_size)
+}
