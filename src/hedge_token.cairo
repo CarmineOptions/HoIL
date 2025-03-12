@@ -35,7 +35,7 @@ trait IHedgeToken<TContractState> {
     // erc1155
     fn has_hedge(self: @TContractState, account: ContractAddress) -> Array<u256>;
     fn balance_of(self: @TContractState, account: ContractAddress, token_id: u256) -> u256;
-    fn get_all_hedges(self: @TContractState, account: ContractAddress) -> Array<u256>;
+    fn get_all_hedges(self: @TContractState, account: ContractAddress) -> Array<HedgeInfo>;
     fn balance_of_batch(
         self: @TContractState, accounts: Span<ContractAddress>, token_ids: Span<u256>
     ) -> Span<u256>;
@@ -110,6 +110,7 @@ mod HedgeToken {
 
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use super::OptionAmount;
+    use super::HedgeInfo;
 
     component!(path: ERC1155Component, storage: erc1155, event: ERC1155Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -170,8 +171,7 @@ mod HedgeToken {
             let mut result = ArrayTrait::new();
             let length = self.token_option_addresses_length.read(token_id);
             let mut i = 0_u32;
-            while(i < length)
-            {
+            while (i < length) {
                 let address = self.token_option_addresses.read((token_id, i));
                 let amount = self.option_tokens.read((token_id, address));
                 if amount > 0 {
@@ -263,8 +263,7 @@ mod HedgeToken {
             // Return the proportional amount of option tokens
             let length = self.token_option_addresses_length.read(token_id);
             let mut i = 0_u32;
-            while(i < length)
-            {
+            while (i < length) {
                 let option_address = self.token_option_addresses.read((token_id, i));
                 let option_amount = self.option_tokens.read((token_id, option_address));
                 let token = IERC20Dispatcher { contract_address: option_address };
@@ -331,9 +330,6 @@ mod HedgeToken {
 
                 // If balance > 0, add the HedgeInfo to the result array
                 if balance > 0 {
-                    let base = self.base_token_address(current_id);
-                    let quote = self.quote_token_address(current_id);
-                    let maturity = self.maturity(current_id);
                     result
                         .append(
                             HedgeInfo {
