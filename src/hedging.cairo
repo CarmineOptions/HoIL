@@ -173,43 +173,6 @@ fn adjust_for_rounding_condition(
     }
 }
 
-// Calculates how much to buy at buystrike to get specified payoff at hedgestrike.
-// And buys via carmine module.
-// fn buy_options_at_strike_to_hedge_at(
-//     to_buy_strike: Fixed,
-//     to_hedge_strike: Fixed,
-//     payoff: Fixed,
-//     expiry: u64,
-//     quote_token_addr: ContractAddress,
-//     base_token_addr: ContractAddress,
-//     calls: bool
-// ) -> u128 {
-//     let notional = how_many_options_at_strike_to_hedge_at(
-//         to_buy_strike, to_hedge_strike, payoff, calls
-//     );
-//     let option_recieved = if (quote_token_addr.into() == TOKEN_USDC_ADDRESS && !calls) {
-//         let adj_notional = adjust_for_rounding_condition(notional, to_buy_strike, 18, 6);
-//         let exp_price = price_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr,
-//         quote_token_addr);
-//         if exp_price != 0 {
-//             buy_option(to_buy_strike, adj_notional, expiry, calls, base_token_addr,
-//             quote_token_addr, Option::Some(exp_price), 6)
-//         } else {0}
-//     } else if !calls {
-//         let exp_price = price_option(to_buy_strike, notional, expiry, calls, base_token_addr,
-//         quote_token_addr);
-//         if exp_price != 0 {
-//             buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr,
-//             Option::Some(exp_price), 18)
-//         } else {0}
-//     } else {
-//         buy_option(to_buy_strike, notional, expiry, calls, base_token_addr, quote_token_addr,
-//         Option::None, 18)
-//     };
-
-//     option_recieved
-// }
-
 fn price_options_at_strike_to_hedge_at(
     to_buy_strike: Fixed,
     to_hedge_strike: Fixed,

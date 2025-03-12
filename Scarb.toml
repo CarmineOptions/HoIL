@@ -23,6 +23,4 @@ test = "snforge test"
 [[tool.snforge.fork]]
 name = "MAINNET"
 url = "https://starknet-mainnet.public.blastapi.io/rpc/v0_7"
-block_id.tag = "Latest"
-steps_limit = 15000000 
-
+block_id.number = "1242000"
