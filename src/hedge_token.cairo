@@ -7,6 +7,14 @@ struct OptionAmount {
     amount: u256
 }
 
+#[derive(Drop, Serde, Copy)]
+struct HedgeInfo {
+    maturity: u64,
+    base: ContractAddress,
+    quote: ContractAddress,
+    id: u256,
+}
+
 #[starknet::interface]
 trait IHedgeToken<TContractState> {
     fn name(self: @TContractState) -> felt252;
@@ -26,7 +34,7 @@ trait IHedgeToken<TContractState> {
     // erc1155
     fn has_hedge(self: @TContractState, account: ContractAddress) -> Array<u256>;
     fn balance_of(self: @TContractState, account: ContractAddress, token_id: u256) -> u256;
-    fn get_all_hedges(self: @TContractState, account: ContractAddress) -> Array<u256>;
+    fn get_all_hedges(self: @TContractState, account: ContractAddress) -> Array<HedgeInfo>;
     fn balance_of_batch(
         self: @TContractState, accounts: Span<ContractAddress>, token_ids: Span<u256>
     ) -> Span<u256>;
@@ -101,6 +109,7 @@ mod HedgeToken {
 
     use hoil::erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
     use super::OptionAmount;
+    use super::HedgeInfo;
 
     component!(path: ERC1155Component, storage: erc1155, event: ERC1155Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -303,11 +312,11 @@ mod HedgeToken {
             self.erc1155.balance_of(account, token_id)
         }
 
-        fn get_all_hedges(self: @ContractState, account: ContractAddress) -> Array<u256> {
+        fn get_all_hedges(self: @ContractState, account: ContractAddress) -> Array<HedgeInfo> {
             let last_token_id = self.next_token_id.read() - 1;
 
-            // Initialize an empty array to store token IDs with balance > 0
-            let mut result: Array<u256> = ArrayTrait::new();
+            // Initialize an empty array to store HedgeInfos
+            let mut result: Array<HedgeInfo> = ArrayTrait::new();
 
             // Start from token_id 0 and iterate up to last_token_id
             let mut current_id: u256 = 0;
@@ -318,9 +327,17 @@ mod HedgeToken {
                 // Check if the account has a positive balance for this token
                 let balance = self.balance_of(account, current_id);
 
-                // If balance > 0, add the token ID to our result array
+                // If balance > 0, add the HedgeInfo to the result array
                 if balance > 0 {
-                    result.append(current_id);
+                    result
+                        .append(
+                            HedgeInfo {
+                                base: self.base_token_address(current_id),
+                                quote: self.quote_token_address(current_id),
+                                maturity: self.maturity(current_id),
+                                id: current_id,
+                            }
+                        );
                 }
 
                 // Move to the next token ID
