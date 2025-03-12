@@ -9,7 +9,6 @@ struct OptionAmount {
 
 #[derive(Drop, Serde, Copy)]
 struct HedgeInfo {
-    balance: u256,
     maturity: u64,
     base: ContractAddress,
     quote: ContractAddress,
@@ -336,7 +335,6 @@ mod HedgeToken {
                                 base: self.base_token_address(current_id),
                                 quote: self.quote_token_address(current_id),
                                 maturity: self.maturity(current_id),
-                                balance,
                                 id: current_id,
                             }
                         );
