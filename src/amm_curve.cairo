@@ -55,8 +55,12 @@ mod tests {
         let expected_x = FixedTrait::from_felt(1506170346379883315200); // ~81.6496
         let expected_y = FixedTrait::from_felt(4518511039139649945600000); // ~244948.8
 
-        assert((x_amount - expected_x).abs() < FixedTrait::from_felt(1), 'wrong x when price increases');
-        assert((y_amount - expected_y).abs() < FixedTrait::from_felt(1), 'wrong y when price increases');
+        assert(
+            (x_amount - expected_x).abs() < FixedTrait::from_felt(1), 'wrong x when price increases'
+        );
+        assert(
+            (y_amount - expected_y).abs() < FixedTrait::from_felt(1), 'wrong y when price increases'
+        );
 
         // Test case 2: Price decreases
         let initial_price = FixedTrait::from_unscaled_felt(2000);
@@ -74,8 +78,12 @@ mod tests {
         let expected_x = FixedTrait::from_felt(2608763564657632870400); // ~141.4213
         let expected_y = FixedTrait::from_felt(2608763564657632870400000); // ~141421.3
 
-        assert((x_amount - expected_x).abs() < FixedTrait::from_felt(1), 'wrong x when price decreases');
-        assert((y_amount - expected_y).abs() < FixedTrait::from_felt(1), 'wrong y when price decreases');
+        assert(
+            (x_amount - expected_x).abs() < FixedTrait::from_felt(1), 'wrong x when price decreases'
+        );
+        assert(
+            (y_amount - expected_y).abs() < FixedTrait::from_felt(1), 'wrong y when price decreases'
+        );
 
         // Test case 3: No price change
         let initial_price = FixedTrait::from_unscaled_felt(2000);
@@ -133,8 +141,12 @@ mod tests {
         let expected_x = FixedTrait::from_felt(16839496401636294656000000); // ~912871
         let expected_y = FixedTrait::from_felt(101036978409817767936000000000); // ~5477226000
 
-        assert((x_amount - expected_x).abs() < FixedTrait::from_felt(1), 'wrong x with large values');
-        assert((y_amount - expected_y).abs() < FixedTrait::from_felt(1), 'wrong y with large values');
+        assert(
+            (x_amount - expected_x).abs() < FixedTrait::from_felt(1), 'wrong x with large values'
+        );
+        assert(
+            (y_amount - expected_y).abs() < FixedTrait::from_felt(1), 'wrong y with large values'
+        );
     }
 
     #[test]

@@ -1,7 +1,8 @@
 #[cfg(test)]
 mod tests {
     use hoil::helpers::{
-        pow, convert_from_int_to_Fixed, convert_from_Fixed_to_int, percent, reverse, toU256_balance
+        pow, convert_from_int_to_Fixed, convert_from_Fixed_to_int, percent, reverse, toU256_balance,
+        closest_value
     };
     use cubit::f128::types::fixed::{Fixed, FixedTrait};
     use array::ArrayTrait;
@@ -76,5 +77,20 @@ mod tests {
         assert(res4 == 54128589999999999999, 'res4'); // 1 gwei rounding error
         assert(res5 == 1124235699999, 'res5'); // also
         assert(res6 == 100183369999, 'res6'); // also
+    }
+
+    #[test]
+    fn test_closest_value() {
+        // Test case 1: a is already a multiple of lcm(b,c)
+        assert_eq!(closest_value(12, 3, 4), 12, "a is already a multiple");
+
+        // Test case 2: a is less than lcm(b,c)
+        assert_eq!(closest_value(5, 3, 4), 12, "Should round up to next multiple 1");
+
+        // Test case 3: a is slightly more than a multiple of lcm(b,c)
+        assert_eq!(closest_value(13, 3, 4), 24, "Should round up to next multiple 2");
+
+        // Test case 4: Large numbers
+        assert_eq!(closest_value(1000, 7, 11), 1001, "Next multiple of lcm(7,11)");
     }
 }

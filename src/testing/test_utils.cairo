@@ -65,21 +65,16 @@ fn HEDGE_TOKEN_TEST_FACTORY() -> ContractAddress {
 }
 
 fn deploy() -> (ContractAddress, ContractAddress) {
-    'a'.print();
     let pail_token = declare("HedgeToken");
     let mut token_depl_args = ArrayTrait::<felt252>::new();
     token_depl_args.append(OWNER().into());
-    'b'.print();
     let token_factory_addr = pail_token.deploy(@token_depl_args).unwrap();
-    'c'.print();
     let pail = declare("ILHedge");
     let mut pail_depl_args = ArrayTrait::<felt252>::new();
     pail_depl_args.append(OWNER().into());
     pail_depl_args.append(token_factory_addr.into());
-    'd'.print();
 
     let pail_addr = pail.deploy(@pail_depl_args).unwrap();
-    'E'.print();
     // set pail address
     let token_factory = pail_token_factory_disp(token_factory_addr);
     start_prank(CheatTarget::One(token_factory_addr), OWNER());

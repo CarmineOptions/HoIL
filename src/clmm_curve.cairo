@@ -111,7 +111,7 @@ mod tests {
         let curr_price = FixedTrait::from_unscaled_felt(2000);
         let amount_x = FixedTrait::from_unscaled_felt(10);
 
-        let result = super::calculate_liquidity(price_a, price_b, curr_price, amount_x);
+        let _ = super::calculate_liquidity(price_a, price_b, curr_price, amount_x);
     }
 
     #[test]
@@ -123,7 +123,7 @@ mod tests {
         let curr_price = FixedTrait::from_unscaled_felt(3000);
         let amount_x = FixedTrait::from_unscaled_felt(10);
 
-        let result = super::calculate_liquidity(price_a, price_b, curr_price, amount_x);
+        let _ = super::calculate_liquidity(price_a, price_b, curr_price, amount_x);
     }
 
     /////////////////////

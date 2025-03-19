@@ -211,7 +211,8 @@ fn price_option(
 /// @param base_token_addr The address of the base token
 /// @param calls Boolean flag - true for call options, false for put options
 /// @return An array of Fixed values representing available strike prices
-/// @custom:throws CALL_OPTIONS_UNAVAILABLE if no options are available with the specified parameters
+/// @custom:throws CALL_OPTIONS_UNAVAILABLE if no options are available with the specified
+/// parameters
 fn available_strikes(
     expiry: u64, quote_token_addr: ContractAddress, base_token_addr: ContractAddress, calls: bool
 ) -> Array<Fixed> {
